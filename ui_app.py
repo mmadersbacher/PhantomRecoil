@@ -90,6 +90,13 @@ class Api:
         logger.info("[Backend] Intensity set -> %s", safe_mult)
         self.macro.set_multiplier(safe_mult)
 
+    def get_caps_state(self):
+        """Called by JavaScript polling to safely read CapsLock state."""
+        try:
+            return bool(ctypes.windll.user32.GetKeyState(win32con.VK_CAPITAL) & 0x0001)
+        except Exception:
+            return False
+
     def ping(self, payload=None):
         with self._ping_lock:
             self.last_ping_ts = time.time()
@@ -150,13 +157,6 @@ def start_diagnostic_watchdog(api):
     thread = threading.Thread(target=watchdog_loop, daemon=True)
     thread.start()
     return thread
-        
-    def get_caps_state(self):
-        """Called by Javascript polling interval to safely get state without threading crashes"""
-        try:
-            return bool(ctypes.windll.user32.GetKeyState(win32con.VK_CAPITAL) & 0x0001)
-        except Exception:
-            return False
 
 if __name__ == '__main__':
     log_path = setup_logging()
