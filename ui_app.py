@@ -1,6 +1,7 @@
 import webview
 import threading
 import os
+import inspect
 from macro import RecoilMacro
 import win32con
 import ctypes
@@ -94,17 +95,24 @@ if __name__ == '__main__':
         logger.warning("[Startup] icon.ico not found at %s. Continuing without custom icon.", icon_file)
         icon_file = None
     
-    # Create the pywebview OS Window wrapping our beautiful web folder
-    window = webview.create_window(
-        'Phantom Recoil', 
-        url=html_file, 
-        js_api=api,
-        width=1100, 
-        height=700,
-        min_size=(900, 550),
-        background_color='#09090b',
-        icon=icon_file
-    )
+    # Create a window with backward compatibility for pywebview variants
+    # that do not implement the `icon` keyword argument.
+    window_kwargs = {
+        'url': html_file,
+        'js_api': api,
+        'width': 1100,
+        'height': 700,
+        'min_size': (900, 550),
+        'background_color': '#09090b',
+    }
+
+    create_window_params = inspect.signature(webview.create_window).parameters
+    if icon_file and 'icon' in create_window_params:
+        window_kwargs['icon'] = icon_file
+    elif icon_file:
+        logger.info("[Startup] pywebview does not support 'icon' parameter. Continuing without custom icon.")
+
+    window = webview.create_window('Phantom Recoil', **window_kwargs)
     api.set_window(window)
 
     # Ensure background loop is stopped when the UI is closed.
