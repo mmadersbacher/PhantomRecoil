@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-label="Phantom Recoil">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06101a" />
+      <stop offset="100%" stop-color="#0e1d31" />
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#41c6ff" />
+      <stop offset="100%" stop-color="#34d9ba" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="320" rx="20" fill="url(#bg)" />
+  <circle cx="150" cy="160" r="74" fill="#11243a" stroke="#2f85b5" stroke-width="2" />
+  <circle cx="150" cy="160" r="38" fill="none" stroke="url(#ring)" stroke-width="10" />
+  <circle cx="150" cy="160" r="10" fill="#b6f2ff" />
+  <text x="265" y="142" fill="#e9f2ff" font-family="Segoe UI, Arial, sans-serif" font-size="56" font-weight="700">Phantom Recoil</text>
+  <text x="265" y="188" fill="#9db4d3" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="500">Enterprise-Style Recoil Profile Manager for Rainbow Six Siege</text>
+  <text x="265" y="232" fill="#7fb7dc" font-family="Consolas, monospace" font-size="18">Windows Desktop | PyWebView | Diagnostics | Installer + Portable</text>
+</svg>
