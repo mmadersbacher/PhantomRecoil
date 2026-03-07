@@ -12,6 +12,7 @@ let renderToken = 0;
 let lastTabSwitchAt = 0;
 let renderInProgress = false;
 let renderQueued = false;
+let diagIntervalId = null;
 
 // DOM Elements
 const grid = document.getElementById('operators-grid');
@@ -69,6 +70,48 @@ function saveDpi(value) {
 
 function isPyWebViewAvailable() {
     return Boolean(window.pywebview && window.pywebview.api);
+}
+
+function sendClientEvent(level, message, context) {
+    if (!isPyWebViewAvailable()) {
+        return;
+    }
+
+    window.pywebview.api.log_client_event(level, message, context || {}).catch(() => {
+        // Ignore telemetry failures to keep UI path non-blocking.
+    });
+}
+
+function startDiagnosticHeartbeat() {
+    if (!isPyWebViewAvailable()) {
+        return;
+    }
+    if (diagIntervalId !== null) {
+        return;
+    }
+
+    diagIntervalId = window.setInterval(() => {
+        if (!isPyWebViewAvailable()) {
+            return;
+        }
+
+        window.pywebview.api.ping({
+            tab: currentTab,
+            searchLength: searchQuery.length,
+            renderInProgress,
+            renderQueued,
+            ts: Date.now(),
+        }).catch(() => {
+            // Avoid recursive error loops on a failing bridge.
+        });
+    }, 2000);
+}
+
+function stopDiagnosticHeartbeat() {
+    if (diagIntervalId !== null) {
+        window.clearInterval(diagIntervalId);
+        diagIntervalId = null;
+    }
 }
 
 function slugify(value) {
@@ -444,6 +487,11 @@ function renderGrid() {
         scheduleFrame(renderChunk);
     } catch (err) {
         console.error('[UI Error] renderGrid failed', err);
+        sendClientEvent('error', 'renderGrid failed', {
+            tab: currentTab,
+            renderInProgress,
+            renderQueued,
+        });
         if (currentToken === renderToken) {
             grid.replaceChildren();
             renderEmptyState('A rendering error occurred. Please switch tabs again.');
@@ -470,6 +518,7 @@ function requestRender() {
 }
 
 function initializeUI() {
+    sendClientEvent('info', 'ui initialized', { tab: currentTab });
     requestRender();
 
     if (searchInput) {
@@ -499,6 +548,7 @@ function initializeUI() {
             event.currentTarget.classList.add('active');
             event.currentTarget.setAttribute('aria-selected', 'true');
             currentTab = nextTab;
+            sendClientEvent('info', 'tab switch', { tab: currentTab });
             requestRender();
         });
     });
@@ -523,14 +573,22 @@ function initializeUI() {
 
 window.addEventListener('error', (event) => {
     console.error('[UI Error] Unhandled error', event.error || event.message);
+    sendClientEvent('error', 'Unhandled error', {
+        message: String(event.message || ''),
+    });
 });
 
 window.addEventListener('unhandledrejection', (event) => {
     console.error('[UI Error] Unhandled promise rejection', event.reason);
+    sendClientEvent('error', 'Unhandled promise rejection', {
+        reason: String(event.reason || ''),
+    });
 });
 
 window.addEventListener('pywebviewready', () => {
     pywebviewReady = true;
+    sendClientEvent('info', 'pywebview ready', {});
+    startDiagnosticHeartbeat();
     startCapsPolling();
     if (intensitySlider) {
         sendMultiplierToBackend(intensitySlider.value);
@@ -538,6 +596,7 @@ window.addEventListener('pywebviewready', () => {
 });
 
 window.addEventListener('beforeunload', () => {
+    stopDiagnosticHeartbeat();
     stopCapsPolling();
     pywebviewReady = false;
 });

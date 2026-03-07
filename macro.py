@@ -53,6 +53,17 @@ class RecoilMacro:
         with self._state_lock:
             self.running = False
 
+    def get_state_snapshot(self):
+        """Return a thread-safe state snapshot for diagnostics."""
+        with self._state_lock:
+            return {
+                'running': self.running,
+                'recoil_x': self.recoil_x,
+                'recoil_y': self.recoil_y,
+                'multiplier': self.multiplier,
+                'is_active': self.is_active,
+            }
+
 
     def start(self):
         """Starts the main polling loop for mouse events."""

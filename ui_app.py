@@ -9,18 +9,53 @@ import sys
 import updater
 import math
 import logging
+import tempfile
+import time
+import json
+import faulthandler
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(name)s: %(message)s'
-)
 logger = logging.getLogger(__name__)
+DIAGNOSTIC_MODE = True
+DIAGNOSTIC_DUMP_SECONDS = 45
+
+
+def get_diagnostic_log_path():
+    base = os.getenv('LOCALAPPDATA')
+    if not base:
+        base = tempfile.gettempdir()
+
+    log_dir = os.path.join(base, 'PhantomRecoil', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(log_dir, 'phantom_recoil_diagnostic.log')
+
+
+def setup_logging():
+    log_path = get_diagnostic_log_path()
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(name)s: %(message)s')
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.handlers.clear()
+
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    root.addHandler(file_handler)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
+
+    logger.info('[Startup] Diagnostic log file: %s', log_path)
+    return log_path
 
 class Api:
     def __init__(self):
         self.macro = RecoilMacro()
         self.window = None
+        self.last_ping_ts = time.time()
+        self.last_ping_payload = None
+        self._ping_lock = threading.Lock()
         
         # Start the background polling thread.
         self.macro_thread = threading.Thread(target=self.macro.start, daemon=True)
@@ -55,6 +90,40 @@ class Api:
         logger.info("[Backend] Intensity set -> %s", safe_mult)
         self.macro.set_multiplier(safe_mult)
 
+    def ping(self, payload=None):
+        with self._ping_lock:
+            self.last_ping_ts = time.time()
+            self.last_ping_payload = payload
+        return {'ok': True, 'ts': self.last_ping_ts}
+
+    def log_client_event(self, level='info', message='', context=None):
+        safe_message = str(message or '')[:300]
+        safe_context = context if isinstance(context, dict) else {}
+
+        try:
+            context_text = json.dumps(safe_context, ensure_ascii=True)[:1000]
+        except Exception:
+            context_text = '{}'
+
+        if level == 'error':
+            logger.error('[Frontend] %s | context=%s', safe_message, context_text)
+        elif level == 'warning':
+            logger.warning('[Frontend] %s | context=%s', safe_message, context_text)
+        else:
+            logger.info('[Frontend] %s | context=%s', safe_message, context_text)
+
+        return {'ok': True}
+
+    def get_diag_status(self):
+        with self._ping_lock:
+            since_ping = time.time() - self.last_ping_ts
+            payload = self.last_ping_payload
+        return {
+            'since_ping_seconds': round(since_ping, 3),
+            'last_ping_payload': payload,
+            'macro': self.macro.get_state_snapshot(),
+        }
+
     def shutdown(self):
         logger.info("[Backend] Shutdown requested, stopping macro loop...")
         self.macro.stop()
@@ -64,6 +133,23 @@ class Api:
                 logger.warning("[Backend] Macro thread did not stop within timeout.")
             else:
                 logger.info("[Backend] Macro thread stopped.")
+
+
+def start_diagnostic_watchdog(api):
+    def watchdog_loop():
+        while True:
+            try:
+                time.sleep(5)
+                status = api.get_diag_status()
+                since_ping = status['since_ping_seconds']
+                if since_ping > 15:
+                    logger.warning('[Diag] Frontend heartbeat stale: %.2fs | macro=%s', since_ping, status['macro'])
+            except Exception as err:
+                logger.exception('[Diag] Watchdog failure: %s', err)
+
+    thread = threading.Thread(target=watchdog_loop, daemon=True)
+    thread.start()
+    return thread
         
     def get_caps_state(self):
         """Called by Javascript polling interval to safely get state without threading crashes"""
@@ -73,10 +159,23 @@ class Api:
             return False
 
 if __name__ == '__main__':
+    log_path = setup_logging()
+
+    if DIAGNOSTIC_MODE:
+        try:
+            with open(log_path, 'a', encoding='utf-8') as dump_file:
+                faulthandler.enable(file=dump_file, all_threads=True)
+                faulthandler.dump_traceback_later(DIAGNOSTIC_DUMP_SECONDS, repeat=True, file=dump_file)
+            logger.info('[Diag] faulthandler enabled with %ss interval.', DIAGNOSTIC_DUMP_SECONDS)
+        except Exception as err:
+            logger.warning('[Diag] Failed to enable faulthandler: %s', err)
+
     # 1. Start GitHub Updater in background thread! This prevents the 5-sec API timeout from freezing the app start.
     threading.Thread(target=updater.run_auto_updater, daemon=True).start()
 
     api = Api()
+    if DIAGNOSTIC_MODE:
+        start_diagnostic_watchdog(api)
     
     # 2. Resolve runtime path robustly for source and PyInstaller builds.
     if getattr(sys, 'frozen', False):
@@ -124,3 +223,8 @@ if __name__ == '__main__':
         webview.start(private_mode=False)
     finally:
         api.shutdown()
+        if DIAGNOSTIC_MODE:
+            try:
+                faulthandler.cancel_dump_traceback_later()
+            except Exception:
+                pass
