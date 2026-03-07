@@ -106,6 +106,14 @@ class RecoilMacro:
                     # Reset accumulators if not actively firing
                     self.accumulated_x = 0.0
                     self.accumulated_y = 0.0
+
+                    # Keep aim-ready mode responsive, but avoid spinning too aggressively.
+                    time.sleep(0.002)
+                    continue
+
+                # Caps Lock is off: use a slower poll to reduce background CPU pressure.
+                time.sleep(0.006)
+                continue
             except Exception as e:
                 logger.exception("[Macro Error] Polling loop failure: %s", e)
                 

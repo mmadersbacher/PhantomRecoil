@@ -404,7 +404,7 @@ function renderGrid() {
             return;
         }
 
-        const chunkSize = 4;
+        const chunkSize = 2;
         let index = 0;
 
         const renderChunk = () => {
@@ -413,21 +413,29 @@ function renderGrid() {
                 return;
             }
 
-            const fragment = document.createDocumentFragment();
-            const max = Math.min(index + chunkSize, filtered.length);
+            try {
+                const fragment = document.createDocumentFragment();
+                const max = Math.min(index + chunkSize, filtered.length);
 
-            while (index < max) {
-                fragment.appendChild(createOperatorCard(filtered[index]));
-                index += 1;
-            }
+                while (index < max) {
+                    fragment.appendChild(createOperatorCard(filtered[index]));
+                    index += 1;
+                }
 
-            if (currentToken === renderToken) {
-                grid.appendChild(fragment);
-            }
+                if (currentToken === renderToken) {
+                    grid.appendChild(fragment);
+                }
 
-            if (index < filtered.length && currentToken === renderToken) {
-                scheduleFrame(renderChunk);
-                return;
+                if (index < filtered.length && currentToken === renderToken) {
+                    scheduleFrame(renderChunk);
+                    return;
+                }
+            } catch (err) {
+                console.error('[UI Error] renderChunk failed', err);
+                if (currentToken === renderToken) {
+                    grid.replaceChildren();
+                    renderEmptyState('A rendering error occurred. Please switch tabs again.');
+                }
             }
 
             finishRenderCycle();
@@ -474,10 +482,15 @@ function initializeUI() {
     tabBtns.forEach((btn) => {
         btn.addEventListener('click', (event) => {
             const now = Date.now();
-            if (now - lastTabSwitchAt < 80) {
+            if (now - lastTabSwitchAt < 150) {
                 return;
             }
             lastTabSwitchAt = now;
+
+            const nextTab = String(event.currentTarget.dataset.tab || 'attackers');
+            if (nextTab === currentTab && !renderInProgress) {
+                return;
+            }
 
             tabBtns.forEach((item) => {
                 item.classList.remove('active');
@@ -485,7 +498,7 @@ function initializeUI() {
             });
             event.currentTarget.classList.add('active');
             event.currentTarget.setAttribute('aria-selected', 'true');
-            currentTab = String(event.currentTarget.dataset.tab || 'attackers');
+            currentTab = nextTab;
             requestRender();
         });
     });
