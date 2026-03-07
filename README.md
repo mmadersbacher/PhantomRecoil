@@ -1,44 +1,50 @@
 # Phantom Recoil
 
-Phantom Recoil is a Windows desktop application (Python + PyWebView) for configuring recoil profiles with DPI-aware scaling.
+Phantom Recoil is a Windows desktop application for recoil profile selection with DPI-aware scaling.
 
-## Scope
-- Desktop UI for operator and weapon profile selection.
-- Runtime recoil loop with Caps Lock activation guard.
-- Persistent local preferences (DPI, favorites).
-- Optional update notification based on GitHub releases.
+## Download and Install (Recommended)
+1. Open the official releases page:
+	- `https://github.com/mmadersbacher/RainbowSixRecoil/releases`
+2. Download the latest installer:
+	- `PhantomRecoilSetup_vX.Y.Z.exe`
+3. Run the installer.
+4. Start the app from Start Menu: `Phantom Recoil`.
 
-## Security Model
-- The updater does not download or execute binaries automatically.
-- Update prompts open the official GitHub releases page only.
-- Users should verify downloaded binaries with SHA256 checksums.
-- Public releases should be Authenticode-signed for publisher authenticity.
+If Windows SmartScreen appears, verify that you downloaded the file from the official GitHub repository above.
 
-## Recommended Public Download
-For end users, use the installer release asset:
-- `PhantomRecoilSetup_vX.Y.Z.exe`
+## Alternative: Portable EXE
+If you do not want to install, download:
+- `Phantom_Recoil_Standalone.exe`
 
-This avoids manual build or script usage and provides a standard Windows installation flow.
+Then run the file directly.
 
-## Download Verification
-Verify release artifact hashes in PowerShell:
+## Verify Download Integrity (Important)
+Download `SHA256SUMS.txt` from the same release and verify in PowerShell:
 
 ```powershell
 Get-FileHash .\PhantomRecoilSetup_vX.Y.Z.exe -Algorithm SHA256
 Get-FileHash .\Phantom_Recoil_Standalone.exe -Algorithm SHA256
 ```
 
-Compare the resulting hash with `SHA256SUMS.txt` from the same release.
+The hash values must match `SHA256SUMS.txt`.
 
-If releases are code-signed, verify signer identity:
+If code signing is enabled for a release, verify signer status:
 
 ```powershell
 Get-AuthenticodeSignature .\PhantomRecoilSetup_vX.Y.Z.exe
 ```
 
-Status should be `Valid` and the signer should match your publisher identity.
+Expected: `Status = Valid`.
 
-## Run From Source
+## Features
+- Operator and weapon profile UI.
+- DPI scaling support.
+- Saved local settings (DPI, favorites).
+- Optional update notifications via GitHub release checks.
+
+## For Developers
+
+### Run From Source
 Requirements:
 - Windows
 - Python 3.9+
@@ -51,7 +57,7 @@ START.bat
 
 `START.bat` installs required dependencies and launches `ui_app.py`.
 
-## Build
+### Build
 Build distributable binaries:
 
 ```bat
@@ -66,7 +72,7 @@ Artifacts:
 
 `BUILD.bat` performs preflight validation and exits with explicit errors when prerequisites are missing.
 
-## Launch Built Binary
+### Launch Built Binary
 
 ```bat
 PLAY.bat
@@ -74,14 +80,14 @@ PLAY.bat
 
 `PLAY.bat` invokes `BUILD.bat` automatically if the standalone executable is not present and stops on build failures.
 
-## Tests
+### Tests
 Run all unit tests:
 
 ```bat
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-## Continuous Integration
+### Continuous Integration
 The workflow in `.github/workflows/build.yml` performs:
 1. Dependency installation
 2. Unit test execution
@@ -90,7 +96,7 @@ The workflow in `.github/workflows/build.yml` performs:
 5. SHA256 generation for executable and installer
 6. Artifact upload (executable, installer, checksum)
 
-## Repository Structure
+### Repository Structure
 - `ui_app.py`: application entry point and PyWebView API bridge.
 - `macro.py`: recoil runtime loop.
 - `updater.py`: release check and user notification logic.
