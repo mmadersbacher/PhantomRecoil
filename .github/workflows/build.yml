@@ -39,7 +39,7 @@ jobs:
     - name: Build installer
       shell: pwsh
       run: |
-        & "C:/Program Files (x86)/Inno Setup 6/ISCC.exe" "installer.iss" "/DAppVersion=$env:APP_VERSION"
+        & "C:/Program Files (x86)/Inno Setup 6/ISCC.exe" "installer.iss" "/DAppVersion=$env:APP_VERSION" "/DSignedUninstallerMode=no"
 
     - name: Generate SHA256
       shell: pwsh

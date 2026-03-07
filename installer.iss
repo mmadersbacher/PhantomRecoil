@@ -2,6 +2,9 @@
 #ifndef AppVersion
   #define AppVersion "1.0.1"
 #endif
+#ifndef SignedUninstallerMode
+  #define SignedUninstallerMode "no"
+#endif
 #define AppPublisher "mmadersbacher"
 #define AppURL "https://github.com/mmadersbacher/RainbowSixRecoil"
 #define AppExeName "Phantom_Recoil_Standalone.exe"
@@ -38,7 +41,7 @@ UninstallDisplayIcon={app}\\{#AppExeName}
 DisableProgramGroupPage=yes
 DisableReadyMemo=no
 SetupLogging=yes
-SignedUninstaller=yes
+SignedUninstaller={#SignedUninstallerMode}
 
 ; Optional code signing. Configure SignTool in your secure release environment.
 ; SignTool=signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a $f
