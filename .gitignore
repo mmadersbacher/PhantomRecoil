@@ -16,6 +16,10 @@ _internal/
 *.json
 *.log
 
+# Release artifacts
+*.exe
+SHA256SUMS.txt
+
 # Editor directories and files
 .idea/
 .vscode/

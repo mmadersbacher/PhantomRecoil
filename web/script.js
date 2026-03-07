@@ -1,10 +1,12 @@
 // State
 let currentTab = 'attackers';
 let searchQuery = '';
-let favorites = JSON.parse(localStorage.getItem('r6_favorites') || '[]');
-let userDpi = parseInt(localStorage.getItem('r6_dpi') || '400', 10);
+let favorites = loadFavorites();
+let userDpi = loadDpi();
 let selectedOperator = null;
 let selectedWeapon = null;
+let capsPollIntervalId = null;
+let pywebviewReady = false;
 
 // DOM Elements
 const grid = document.getElementById('operators-grid');
@@ -12,208 +14,427 @@ const searchInput = document.getElementById('search-input');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const intensitySlider = document.getElementById('intensity');
 const intensityVal = document.getElementById('intensity-val');
+const dpiInput = document.getElementById('dpi-input');
 
-// Python Bridge Connection
-window.addEventListener('pywebviewready', function () {
+function loadFavorites() {
+    try {
+        const raw = localStorage.getItem('r6_favorites');
+        if (!raw) {
+            return [];
+        }
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed.filter((item) => typeof item === 'string' && item.trim().length > 0);
+    } catch (err) {
+        console.warn('[Storage] Invalid favorites found, resetting.', err);
+        return [];
+    }
+}
+
+function saveFavorites() {
+    localStorage.setItem('r6_favorites', JSON.stringify(favorites));
+}
+
+function clampDpi(value) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) {
+        return 400;
+    }
+    return Math.max(100, Math.min(32000, parsed));
+}
+
+function loadDpi() {
+    try {
+        return clampDpi(localStorage.getItem('r6_dpi') || '400');
+    } catch (err) {
+        console.warn('[Storage] Invalid DPI found, using default.', err);
+        return 400;
+    }
+}
+
+function saveDpi(value) {
+    userDpi = clampDpi(value);
+    localStorage.setItem('r6_dpi', String(userDpi));
+    if (dpiInput) {
+        dpiInput.value = String(userDpi);
+    }
+}
+
+function isPyWebViewAvailable() {
+    return Boolean(window.pywebview && window.pywebview.api);
+}
+
+function slugify(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function setStatusIndicator(isOn) {
     const indicator = document.getElementById('status-indicator');
     const text = document.getElementById('status-text');
+    if (!indicator || !text) {
+        return;
+    }
 
-    // Poll the backend every 500ms to safely check CapsLock status
-    setInterval(() => {
-        pywebview.api.get_caps_state().then(isOn => {
-            if (isOn) {
-                indicator.classList.remove('idle');
-                indicator.classList.add('active');
-                text.innerText = "ON";
-            } else {
-                indicator.classList.remove('active');
-                indicator.classList.add('idle');
-                text.innerText = "OFF";
-            }
-        }).catch(err => console.error("[PyWebView API Error]", err));
+    if (isOn) {
+        indicator.classList.remove('idle');
+        indicator.classList.add('active');
+        text.textContent = 'ON';
+    } else {
+        indicator.classList.remove('active');
+        indicator.classList.add('idle');
+        text.textContent = 'OFF';
+    }
+}
+
+function startCapsPolling() {
+    if (!isPyWebViewAvailable()) {
+        return;
+    }
+    if (capsPollIntervalId !== null) {
+        return;
+    }
+
+    capsPollIntervalId = window.setInterval(() => {
+        if (!isPyWebViewAvailable()) {
+            setStatusIndicator(false);
+            return;
+        }
+        window.pywebview.api.get_caps_state()
+            .then((isOn) => setStatusIndicator(Boolean(isOn)))
+            .catch((err) => {
+                console.error('[PyWebView API Error] get_caps_state failed', err);
+                setStatusIndicator(false);
+            });
     }, 500);
+}
 
-    // Send initial DPI multiplier to backend just to be safe
-    const startVal = parseFloat(intensitySlider.value).toFixed(2);
-    pywebview.api.set_multiplier(parseFloat(startVal));
-});
+function stopCapsPolling() {
+    if (capsPollIntervalId !== null) {
+        window.clearInterval(capsPollIntervalId);
+        capsPollIntervalId = null;
+    }
+}
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    // Sort alpha
-    operatorData.sort((a, b) => a.name.localeCompare(b.name));
+function sendMultiplierToBackend(value) {
+    const parsed = Number.parseFloat(value);
+    const safeValue = Number.isFinite(parsed) ? Math.max(0.01, Math.min(1.0, parsed)) : 0.5;
+    intensityVal.textContent = `${safeValue.toFixed(2)}x`;
+
+    if (isPyWebViewAvailable()) {
+        window.pywebview.api.set_multiplier(safeValue).catch((err) => {
+            console.error('[PyWebView API Error] set_multiplier failed', err);
+        });
+    }
+}
+
+function updateSidebarSelection(operator, weapon) {
+    const avatarEl = document.getElementById('selected-op-initials');
+    const selectedName = document.getElementById('selected-name');
+    const selectedWeaponName = document.getElementById('selected-weapon');
+    const valX = document.getElementById('val-x');
+    const valY = document.getElementById('val-y');
+
+    if (!avatarEl || !selectedName || !selectedWeaponName || !valX || !valY) {
+        return;
+    }
+
+    const initials = operator.name.substring(0, 2).toUpperCase();
+    const badgeUrl = `https://trackercdn.com/cdn/r6.tracker.network/operators/badges/${slugify(operator.name)}.png`;
+
+    avatarEl.replaceChildren();
+    avatarEl.style.background = 'transparent';
+
+    const img = document.createElement('img');
+    img.src = badgeUrl;
+    img.alt = initials;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'cover';
+    img.style.borderRadius = '50%';
+    img.style.border = '2px solid var(--accent)';
+    img.addEventListener('error', () => {
+        avatarEl.replaceChildren();
+        avatarEl.style.background = 'var(--bg-card)';
+        avatarEl.textContent = initials;
+    });
+    avatarEl.appendChild(img);
+
+    selectedName.textContent = operator.name;
+    selectedWeaponName.textContent = weapon.name;
+    valX.textContent = String(weapon.x);
+    valY.textContent = String(weapon.y);
+}
+
+function selectWeapon(operator, weapon) {
+    selectedOperator = operator;
+    selectedWeapon = weapon;
+
+    updateSidebarSelection(operator, weapon);
+
+    const dpiMultiplier = 400 / clampDpi(userDpi);
+    const scaledX = Number(weapon.x) * dpiMultiplier;
+    const scaledY = Number(weapon.y) * dpiMultiplier;
+
+    if (isPyWebViewAvailable()) {
+        window.pywebview.api.set_recoil(scaledX, scaledY).catch((err) => {
+            console.error('[PyWebView API Error] set_recoil failed', err);
+        });
+    } else {
+        console.log(
+            `[DEV Mock] Selected ${operator.name} - ${weapon.name} | Base X:${weapon.x} Y:${weapon.y} | Scaled X:${scaledX} Y:${scaledY}`
+        );
+    }
 
     renderGrid();
+}
 
-    // Search Listener
-    searchInput.addEventListener('input', (e) => {
-        searchQuery = e.target.value.toLowerCase();
-        renderGrid();
+function toggleFavorite(opName) {
+    if (favorites.includes(opName)) {
+        favorites = favorites.filter((fav) => fav !== opName);
+    } else {
+        favorites.push(opName);
+    }
+    saveFavorites();
+    renderGrid();
+}
+
+function createWeaponButton(operator, weapon) {
+    const btn = document.createElement('button');
+    btn.className = 'weapon-btn';
+    if (selectedOperator?.name === operator.name && selectedWeapon?.name === weapon.name) {
+        btn.classList.add('selected');
+    }
+
+    btn.type = 'button';
+    btn.setAttribute('aria-label', `${operator.name} ${weapon.name} recoil profile`);
+
+    const left = document.createElement('div');
+    left.style.display = 'flex';
+    left.style.alignItems = 'center';
+    left.style.gap = '8px';
+
+    const weaponImg = document.createElement('img');
+    weaponImg.src = `https://trackercdn.com/cdn/r6.tracker.network/weapons/${slugify(weapon.name)}.png`;
+    weaponImg.alt = '';
+    weaponImg.setAttribute('aria-hidden', 'true');
+    weaponImg.style.width = '28px';
+    weaponImg.style.height = '14px';
+    weaponImg.style.objectFit = 'contain';
+    weaponImg.style.filter = 'drop-shadow(0 1px 1px rgba(0,0,0,0.8))';
+    weaponImg.addEventListener('error', () => {
+        weaponImg.style.display = 'none';
     });
 
-    // Tab Listeners
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            tabBtns.forEach(b => b.classList.remove('active'));
-            e.currentTarget.classList.add('active');
-            currentTab = e.currentTarget.dataset.tab;
+    const weaponName = document.createElement('span');
+    weaponName.className = 'weapon-name';
+    weaponName.textContent = weapon.name;
+
+    left.appendChild(weaponImg);
+    left.appendChild(weaponName);
+
+    const stats = document.createElement('span');
+    stats.className = 'weapon-stats';
+    stats.textContent = `X${weapon.x} Y${weapon.y}`;
+
+    btn.appendChild(left);
+    btn.appendChild(stats);
+    btn.addEventListener('click', () => selectWeapon(operator, weapon));
+
+    return btn;
+}
+
+function createOperatorCard(operator) {
+    const isFav = favorites.includes(operator.name);
+    const groupEl = document.createElement('div');
+    groupEl.className = 'op-group';
+    groupEl.style.borderTop = `2px solid ${operator.role === 'Attacker' ? 'var(--attacker)' : 'var(--defender)'}`;
+
+    const header = document.createElement('div');
+    header.className = 'op-header';
+
+    const opInfo = document.createElement('div');
+    opInfo.className = 'op-info';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'small-avatar';
+    avatar.style.overflow = 'hidden';
+    avatar.style.position = 'relative';
+    avatar.style.background = 'var(--bg-dark)';
+
+    const initials = operator.name.substring(0, 2).toUpperCase();
+    const opImg = document.createElement('img');
+    opImg.src = `https://trackercdn.com/cdn/r6.tracker.network/operators/badges/${slugify(operator.name)}.png`;
+    opImg.alt = initials;
+    opImg.style.position = 'absolute';
+    opImg.style.width = '100%';
+    opImg.style.height = '100%';
+    opImg.style.objectFit = 'cover';
+    opImg.style.transform = 'scale(1.15)';
+    opImg.style.opacity = '0.9';
+    opImg.addEventListener('error', () => {
+        avatar.replaceChildren();
+        const fallback = document.createElement('span');
+        fallback.style.color = 'var(--text-muted)';
+        fallback.style.fontWeight = '600';
+        fallback.textContent = initials;
+        avatar.appendChild(fallback);
+    });
+    avatar.appendChild(opImg);
+
+    const nameEl = document.createElement('h3');
+    nameEl.style.fontSize = '14px';
+    nameEl.style.fontWeight = '600';
+    nameEl.style.color = 'var(--text-main)';
+    nameEl.textContent = operator.name;
+
+    opInfo.appendChild(avatar);
+    opInfo.appendChild(nameEl);
+
+    const favBtn = document.createElement('button');
+    favBtn.className = `fav-btn ${isFav ? 'active' : ''}`;
+    favBtn.type = 'button';
+    favBtn.setAttribute('aria-label', `Toggle favorite for ${operator.name}`);
+    favBtn.setAttribute('aria-pressed', isFav ? 'true' : 'false');
+    const favIcon = document.createElement('span');
+    favIcon.className = 'material-icons-outlined';
+    favIcon.textContent = isFav ? 'star' : 'star_border';
+    favIcon.setAttribute('aria-hidden', 'true');
+    favBtn.appendChild(favIcon);
+    favBtn.addEventListener('click', () => toggleFavorite(operator.name));
+
+    header.appendChild(opInfo);
+    header.appendChild(favBtn);
+
+    const weaponsList = document.createElement('div');
+    weaponsList.className = 'weapons-list';
+    operator.weapons.forEach((weapon) => {
+        weaponsList.appendChild(createWeaponButton(operator, weapon));
+    });
+
+    groupEl.appendChild(header);
+    groupEl.appendChild(weaponsList);
+    return groupEl;
+}
+
+function getFilteredOperators() {
+    const normalized = operatorData
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    let filtered = normalized;
+    if (currentTab === 'attackers') {
+        filtered = filtered.filter((op) => op.role === 'Attacker');
+    } else if (currentTab === 'defenders') {
+        filtered = filtered.filter((op) => op.role === 'Defender');
+    } else if (currentTab === 'favorites') {
+        filtered = filtered.filter((op) => favorites.includes(op.name));
+    }
+
+    if (searchQuery) {
+        filtered = filtered.filter((op) =>
+            op.name.toLowerCase().includes(searchQuery)
+            || op.weapons.some((weapon) => weapon.name.toLowerCase().includes(searchQuery))
+        );
+    }
+
+    if (currentTab !== 'favorites') {
+        filtered.sort((a, b) => {
+            const aFav = favorites.includes(a.name) ? 1 : 0;
+            const bFav = favorites.includes(b.name) ? 1 : 0;
+            if (aFav !== bFav) {
+                return bFav - aFav;
+            }
+            return a.name.localeCompare(b.name);
+        });
+    }
+
+    return filtered;
+}
+
+function renderEmptyState(message) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = message;
+    grid.appendChild(empty);
+}
+
+function renderGrid() {
+    if (!grid) {
+        return;
+    }
+
+    grid.replaceChildren();
+    const filtered = getFilteredOperators();
+
+    if (filtered.length === 0) {
+        renderEmptyState('No operators found for the current filters.');
+        return;
+    }
+
+    filtered.forEach((operator) => {
+        grid.appendChild(createOperatorCard(operator));
+    });
+}
+
+function initializeUI() {
+    renderGrid();
+
+    if (searchInput) {
+        searchInput.addEventListener('input', (event) => {
+            searchQuery = String(event.target.value || '').toLowerCase();
+            renderGrid();
+        });
+    }
+
+    tabBtns.forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            tabBtns.forEach((item) => {
+                item.classList.remove('active');
+                item.setAttribute('aria-selected', 'false');
+            });
+            event.currentTarget.classList.add('active');
+            event.currentTarget.setAttribute('aria-selected', 'true');
+            currentTab = String(event.currentTarget.dataset.tab || 'attackers');
             renderGrid();
         });
     });
 
-    // Intensity Slider
-    intensitySlider.addEventListener('input', (e) => {
-        const val = parseFloat(e.target.value).toFixed(2);
-        intensityVal.textContent = val + 'x';
-        // Send to Python
-        if (window.pywebview) {
-            pywebview.api.set_multiplier(parseFloat(val));
-        }
-    });
+    if (intensitySlider) {
+        intensitySlider.addEventListener('input', (event) => {
+            sendMultiplierToBackend(event.target.value);
+        });
+        sendMultiplierToBackend(intensitySlider.value);
+    }
 
-    // Remove the old manual timeout check here. We will use the proper pywebviewready event instead.
-
-
-    // DPI Input Listeners
-    const dpiInput = document.getElementById('dpi-input');
     if (dpiInput) {
-        dpiInput.value = userDpi;
-        dpiInput.addEventListener('change', (e) => {
-            userDpi = parseInt(e.target.value, 10) || 400;
-            localStorage.setItem('r6_dpi', userDpi);
-            // Re-trigger selection to apply new math
+        dpiInput.value = String(userDpi);
+        dpiInput.addEventListener('change', (event) => {
+            saveDpi(event.target.value);
             if (selectedOperator && selectedWeapon) {
                 selectWeapon(selectedOperator, selectedWeapon);
             }
         });
     }
+}
+
+window.addEventListener('pywebviewready', () => {
+    pywebviewReady = true;
+    startCapsPolling();
+    if (intensitySlider) {
+        sendMultiplierToBackend(intensitySlider.value);
+    }
 });
 
-function toggleFavorite(opName) {
-    if (favorites.includes(opName)) {
-        favorites = favorites.filter(f => f !== opName);
-    } else {
-        favorites.push(opName);
+window.addEventListener('beforeunload', () => {
+    stopCapsPolling();
+    pywebviewReady = false;
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    initializeUI();
+    if (pywebviewReady) {
+        startCapsPolling();
     }
-    localStorage.setItem('r6_favorites', JSON.stringify(favorites));
-    renderGrid();
-}
-
-function selectWeapon(op, weapon) {
-    selectedOperator = op;
-    selectedWeapon = weapon;
-
-    const cleanName = op.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const badgeUrl = `https://trackercdn.com/cdn/r6.tracker.network/operators/badges/${cleanName}.png`;
-
-    // Update UI Sidebar
-    const avatarEl = document.getElementById('selected-op-initials');
-    avatarEl.innerHTML = `<img src="${badgeUrl}" onerror="this.onerror=null; this.outerHTML='${op.name.substring(0, 2).toUpperCase()}'" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%; border: 2px solid var(--accent);"/>`;
-    avatarEl.style.background = 'transparent';
-
-    document.getElementById('selected-name').innerText = op.name;
-    document.getElementById('selected-weapon').innerText = weapon.name;
-    document.getElementById('val-x').innerText = weapon.x;
-    document.getElementById('val-y').innerText = weapon.y;
-
-    // Apply visual styling to list
-    document.querySelectorAll('.weapon-btn').forEach(btn => btn.classList.remove('selected'));
-    const activeBtn = document.getElementById(`wpn-${op.name}-${weapon.name}`);
-    if (activeBtn) activeBtn.classList.add('selected');
-
-    // Trigger Python Backend with DPI Math
-    // Target base is 400 DPI. If running 800 DPI, we drop values by half (x 0.5)
-    const dpiMultiplier = 400 / userDpi;
-    const scaledX = weapon.x * dpiMultiplier;
-    const scaledY = weapon.y * dpiMultiplier;
-
-    if (window.pywebview) {
-        pywebview.api.set_recoil(scaledX, scaledY);
-    } else {
-        console.log(`[DEV Mock] Selected ${op.name} - ${weapon.name} | Base X:${weapon.x} Y:${weapon.y} | Scaled X:${scaledX} Y:${scaledY}`);
-    }
-}
-
-function renderGrid() {
-    grid.innerHTML = '';
-
-    let filtered = operatorData;
-
-    // Filter based on Tab
-    if (currentTab === 'attackers') {
-        filtered = filtered.filter(op => op.role === 'Attacker');
-    } else if (currentTab === 'defenders') {
-        filtered = filtered.filter(op => op.role === 'Defender');
-    } else if (currentTab === 'favorites') {
-        filtered = filtered.filter(op => favorites.includes(op.name));
-    }
-
-    // Filter based on Search (match op name or weapon name)
-    if (searchQuery) {
-        filtered = filtered.filter(op =>
-            op.name.toLowerCase().includes(searchQuery) ||
-            op.weapons.some(w => w.name.toLowerCase().includes(searchQuery))
-        );
-    }
-
-    // Sort Favorites to the top if we are inside Attacker/Defender tabs
-    if (currentTab !== 'favorites') {
-        filtered.sort((a, b) => {
-            const aFav = favorites.includes(a.name) ? 1 : 0;
-            const bFav = favorites.includes(b.name) ? 1 : 0;
-            return bFav - aFav;
-        });
-    }
-
-    filtered.forEach(op => {
-        const isFav = favorites.includes(op.name);
-
-        // Group Element
-        const groupEl = document.createElement('div');
-        groupEl.className = 'op-group';
-
-        // Header
-        const initials = op.name.substring(0, 2).toUpperCase();
-        // Attacker Red, Defender Blue
-        const roleColor = op.role === 'Attacker' ? 'var(--attacker)' : 'var(--defender)';
-
-        const cleanName = op.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const badgeUrl = `https://trackercdn.com/cdn/r6.tracker.network/operators/badges/${cleanName}.png`;
-
-        let weaponsHtml = op.weapons.map(wpn => {
-            const isSelected = selectedOperator?.name === op.name && selectedWeapon?.name === wpn.name;
-            let cleanWpn = wpn.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-            const wpnIconUrl = `https://trackercdn.com/cdn/r6.tracker.network/weapons/${cleanWpn}.png`;
-            return `
-        <button id="wpn-${op.name}-${wpn.name}" class="weapon-btn ${isSelected ? 'selected' : ''}" onclick="selectWeapon(${JSON.stringify(op).replace(/"/g, '&quot;')}, ${JSON.stringify(wpn).replace(/"/g, '&quot;')})">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <img src="${wpnIconUrl}" onerror="this.style.display='none'" style="width: 28px; height: 14px; object-fit: contain; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.8));" />
-            <span class="weapon-name">${wpn.name}</span>
-          </div>
-          <span class="weapon-stats">X${wpn.x} Y${wpn.y}</span>
-        </button>
-      `;
-        }).join('');
-
-        groupEl.style.borderTop = `2px solid ${roleColor}`;
-
-        groupEl.innerHTML = `
-      <div class="op-header">
-        <div class="op-info">
-          <div class="small-avatar" style="overflow: hidden; position: relative; background: var(--bg-dark);">
-            <img src="${badgeUrl}" alt="${initials}" onerror="this.onerror=null; this.outerHTML='<span style=\\'color: var(--text-muted); font-weight: 600;\\'>${initials}</span>';" style="position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scale(1.15); opacity: 0.9;"/>
-          </div>
-          <h3 style="font-size: 14px; font-weight: 600; color: var(--text-main);">${op.name}</h3>
-        </div>
-        <button class="fav-btn ${isFav ? 'active' : ''}" onclick="toggleFavorite('${op.name}')">
-          <span class="material-icons-outlined">${isFav ? 'star' : 'star_border'}</span>
-        </button>
-      </div>
-      <div class="weapons-list">
-        ${weaponsHtml}
-      </div>
-    `;
-
-        grid.appendChild(groupEl);
-    });
-}
+});

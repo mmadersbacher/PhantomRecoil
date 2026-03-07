@@ -22,23 +22,23 @@
           <span class="material-icons-outlined">adjust</span>
           Phantom Recoil
         </h1>
-        <p class="status idle" id="status-indicator">Caps Lock <span id="status-text">OFF</span></p>
+        <p class="status idle" id="status-indicator" role="status" aria-live="polite">Caps Lock <span id="status-text">OFF</span></p>
       </div>
 
       <div class="settings-panel">
         <div class="setting-item">
           <label for="dpi-input">Mouse DPI (Scaling Base: 400)</label>
-          <input type="number" id="dpi-input" value="400" min="100" max="32000" step="50">
-          <p class="help-text">Math auto-adjusts based on your DPI.</p>
+          <input type="number" id="dpi-input" value="400" min="100" max="32000" step="50" aria-describedby="dpi-help">
+          <p class="help-text" id="dpi-help">Math auto-adjusts based on your DPI.</p>
         </div>
 
         <div class="setting-item">
           <label for="intensity">Recoil Intensity (Smoothness)</label>
           <div class="slider-container">
-            <input type="range" id="intensity" min="0.01" max="1.0" step="0.01" value="0.50">
+            <input type="range" id="intensity" min="0.01" max="1.0" step="0.01" value="0.50" aria-describedby="intensity-help intensity-val">
             <span id="intensity-val" class="slider-val">0.50x</span>
           </div>
-          <p class="help-text">Lowers aggressive Y pulling</p>
+          <p class="help-text" id="intensity-help">Lowers aggressive Y pulling</p>
         </div>
 
         <div class="active-selection">
@@ -60,18 +60,18 @@
       <header class="topbar">
         <div class="search-container">
           <span class="material-icons-outlined search-icon">search</span>
-          <input type="text" id="search-input" placeholder="Search Operators or Weapons...">
+          <input type="text" id="search-input" placeholder="Search Operators or Weapons..." aria-label="Search operators or weapons">
         </div>
-        <div class="tabs">
-          <button class="tab-btn active" data-tab="attackers">Attackers</button>
-          <button class="tab-btn" data-tab="defenders">Defenders</button>
-          <button class="tab-btn" data-tab="favorites">Favorites <span
-              class="material-icons-outlined s-icon">star</span></button>
+        <div class="tabs" role="tablist" aria-label="Operator categories">
+          <button class="tab-btn active" data-tab="attackers" role="tab" aria-selected="true">Attackers</button>
+          <button class="tab-btn" data-tab="defenders" role="tab" aria-selected="false">Defenders</button>
+          <button class="tab-btn" data-tab="favorites" role="tab" aria-selected="false">Favorites <span
+              class="material-icons-outlined s-icon" aria-hidden="true">star</span></button>
         </div>
       </header>
 
       <div class="content-area">
-        <div id="operators-grid" class="grid-container">
+        <div id="operators-grid" class="grid-container" aria-live="polite">
           <!-- Populated by JS -->
         </div>
       </div>

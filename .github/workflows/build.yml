@@ -1,0 +1,49 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install pyinstaller pywebview pywin32 pillow
+
+    - name: Run tests
+      run: |
+        python -m unittest discover -s tests -p "test_*.py"
+
+    - name: Build executable
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --noconsole --name "Phantom_Recoil_Standalone" --icon="icon.ico" --add-data "web;web" --add-data "icon.ico;." "ui_app.py"
+
+    - name: Generate SHA256
+      shell: pwsh
+      run: |
+        $hash = Get-FileHash "dist/Phantom_Recoil_Standalone.exe" -Algorithm SHA256
+        "Phantom_Recoil_Standalone.exe $($hash.Hash)" | Out-File -FilePath SHA256SUMS.txt -Encoding ascii
+
+    - name: Upload executable artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Phantom_Recoil_Standalone
+        path: dist/Phantom_Recoil_Standalone.exe
+
+    - name: Upload checksum artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SHA256SUMS
+        path: SHA256SUMS.txt

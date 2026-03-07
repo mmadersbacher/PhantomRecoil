@@ -1,86 +1,119 @@
 import urllib.request
+import urllib.error
 import json
-import os
 import sys
-import subprocess
-import time
+import webbrowser
+import ctypes
+import logging
+import re
 
 # Semantic version of the CURRENT build
-__version__ = "v1.0.0"
+__version__ = "v1.0.1"
 
 GITHUB_REPO = "mmadersbacher/RainbowSixRecoil"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+REQUEST_TIMEOUT_SECONDS = 5
+
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_version(version_text):
+    """Parse tags like v1.2.3 or 1.2.3 into a comparable tuple."""
+    if not version_text:
+        return None
+    match = re.match(r'^v?(\d+)\.(\d+)\.(\d+)$', str(version_text).strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _is_newer_version(current, latest):
+    current_parsed = _parse_version(current)
+    latest_parsed = _parse_version(latest)
+    if current_parsed is None or latest_parsed is None:
+        return False
+    return latest_parsed > current_parsed
 
 def check_for_updates():
     """
     Checks the GitHub repository for new releases.
-    Returns the download URL for the new .exe if an update is available, else None.
+    Returns the release URL and the new version if an update is available, else (None, None).
     """
     try:
         req = urllib.request.Request(API_URL, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            latest_version = data.get("tag_name", "")
-            
-            if latest_version and latest_version != __version__:
-                print(f"[Updater] New version found: {latest_version} (Current: {__version__})")
-                
-                # Find the .exe asset
-                for asset in data.get("assets", []):
-                    if asset.get("name", "").endswith(".exe"):
-                        return asset.get("browser_download_url")
-                        
-    except Exception as e:
-        print(f"[Updater] Failed to check for updates: {e}")
-        
-    return None
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            remaining = response.headers.get('X-RateLimit-Remaining')
+            if remaining is not None:
+                logger.info("[Updater] GitHub rate limit remaining: %s", remaining)
 
-def download_and_update(download_url):
+            payload = response.read().decode('utf-8')
+            data = json.loads(payload)
+            latest_version = data.get("tag_name", "")
+            if _parse_version(latest_version) is None:
+                logger.warning("[Updater] Ignoring release with invalid version tag: %s", latest_version)
+                return None, None
+            
+            if latest_version and _is_newer_version(__version__, latest_version):
+                logger.info("[Updater] New version found: %s (Current: %s)", latest_version, __version__)
+                
+                release_url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases/latest")
+                return release_url, latest_version
+            logger.info("[Updater] No newer release available.")
+
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            logger.warning("[Updater] Rate limited by GitHub API (HTTP 403).")
+        else:
+            logger.warning("[Updater] HTTP error during update check: %s", e)
+    except urllib.error.URLError as e:
+        logger.warning("[Updater] Network error during update check: %s", e)
+    except TimeoutError:
+        logger.warning("[Updater] Timeout while checking for updates.")
+    except json.JSONDecodeError as e:
+        logger.warning("[Updater] Invalid JSON from GitHub API: %s", e)
+    except Exception as e:
+        logger.exception("[Updater] Unexpected failure during update check: %s", e)
+        
+    return None, None
+
+def notify_update(release_url, version):
     """
-    Downloads the new .exe to a temporary location and launches a batch script
-    to replace the current running executable.
+    Prompts the user about the new update and opens the browser if they accept.
+    This replaces the old batch-script silent auto-update to prevent Antivirus flagging.
     """
     try:
-        print("[Updater] Downloading new release...")
-        current_exe = sys.executable
+        logger.info("[Updater] Prompting user for update to %s...", version)
         
         # If running from source (python ui_app.py), sys.executable is python.exe. 
         # We only want to auto-update if we are the bundled .exe.
         if not getattr(sys, 'frozen', False):
-            print("[Updater] Running from source, skipping auto-update execution.")
+            logger.info("[Updater] Running from source, skipping update notification.")
             return
 
-        temp_dir = os.environ.get("TEMP", os.path.dirname(current_exe))
-        new_exe_path = os.path.join(temp_dir, "R6_Recoil_Update.exe")
+        MB_YESNO = 0x04
+        MB_ICONINFORMATION = 0x40
+        MB_TOPMOST = 0x40000
+        IDYES = 6
         
-        # Download
-        req = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response, open(new_exe_path, 'wb') as out_file:
-            out_file.write(response.read())
-
-        # Create a batch script to swap the files
-        bat_path = os.path.join(temp_dir, "r6_updater.bat")
+        text = (
+            f"A new version ({version}) of Phantom Recoil is available!\n\n"
+            "The download page will open in your browser.\n"
+            "Only download releases from the official GitHub repository."
+        )
+        title = "Update Available"
         
-        with open(bat_path, "w") as f:
-            f.write(f'''@echo off
-timeout /t 2 /nobreak > NUL
-del "{current_exe}"
-move /Y "{new_exe_path}" "{current_exe}"
-start "" "{current_exe}"
-del "%~f0"
-''')
+        result = ctypes.windll.user32.MessageBoxW(0, text, title, MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST)
         
-        # Launch the batch script detached and HARD-KILL the entire application tree
-        print("[Updater] Handing off to updater batch script...")
-        subprocess.Popen(bat_path, creationflags=subprocess.CREATE_NO_WINDOW)
-        os._exit(0)
-        
+        if result == IDYES:
+            webbrowser.open(release_url)
+            
     except Exception as e:
-        print(f"[Updater] Update failed: {e}")
+        logger.exception("[Updater] Update notification failed: %s", e)
 
 def run_auto_updater():
     """Main entrypoint for the updater routine."""
-    print(f"[Updater] Checking for updates (Current: {__version__})...")
-    download_url = check_for_updates()
-    if download_url:
-        download_and_update(download_url)
+    logger.info("[Updater] Checking for updates (Current: %s)...", __version__)
+    release_url, version = check_for_updates()
+    if release_url:
+        notify_update(release_url, version)
