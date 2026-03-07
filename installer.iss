@@ -1,6 +1,6 @@
 #define AppName "Phantom Recoil"
 #ifndef AppVersion
-  #define AppVersion "1.0.14"
+  #define AppVersion "1.0.15"
 #endif
 #ifndef SignedUninstallerMode
   #define SignedUninstallerMode "no"
@@ -42,6 +42,9 @@ DisableProgramGroupPage=yes
 DisableReadyMemo=no
 SetupLogging=yes
 SignedUninstaller={#SignedUninstallerMode}
+CloseApplications=yes
+CloseApplicationsFilter={#AppExeName}
+RestartApplications=no
 
 ; Optional code signing. Configure SignTool in your secure release environment.
 ; SignTool=signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a $f
@@ -53,7 +56,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "{#AppExePath}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#AppExePath}"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
