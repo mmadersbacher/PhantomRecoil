@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Windows specific
+Desktop.ini
+
+# PyInstaller folders
+build/
+dist/
+*.spec
+_internal/
+
+# User settings cache if any
+*.json
+*.log
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.user

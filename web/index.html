@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>R6 Recoil Controller</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Load Google Fonts for premium typography -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Material Icons for sleek ui elements -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+</head>
+
+<body>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">
+          <span class="material-icons-outlined">adjust</span>
+          R6 Macro
+        </h1>
+        <p class="status idle" id="status-indicator">Caps Lock <span id="status-text">OFF</span></p>
+      </div>
+
+      <div class="settings-panel">
+        <div class="setting-item">
+          <label for="dpi-input">Mouse DPI (Scaling Base: 400)</label>
+          <input type="number" id="dpi-input" value="400" min="100" max="32000" step="50">
+          <p class="help-text">Math auto-adjusts based on your DPI.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="intensity">Recoil Intensity (Smoothness)</label>
+          <div class="slider-container">
+            <input type="range" id="intensity" min="0.01" max="1.0" step="0.01" value="0.50">
+            <span id="intensity-val" class="slider-val">0.50x</span>
+          </div>
+          <p class="help-text">Lowers aggressive Y pulling</p>
+        </div>
+
+        <div class="active-selection">
+          <h3>Active Layout</h3>
+          <div class="selected-op-card">
+            <div id="selected-op-initials" class="op-avatar">?</div>
+            <div class="selected-details">
+              <h4 id="selected-name">No Operator</h4>
+              <p id="selected-weapon">Select a weapon</p>
+              <div class="recoil-values">X: <span id="val-x">0</span> | Y: <span id="val-y">0</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="topbar">
+        <div class="search-container">
+          <span class="material-icons-outlined search-icon">search</span>
+          <input type="text" id="search-input" placeholder="Search Operators or Weapons...">
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="attackers">Attackers</button>
+          <button class="tab-btn" data-tab="defenders">Defenders</button>
+          <button class="tab-btn" data-tab="favorites">Favorites <span
+              class="material-icons-outlined s-icon">star</span></button>
+        </div>
+      </header>
+
+      <div class="content-area">
+        <div id="operators-grid" class="grid-container">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="script.js"></script>
+</body>
+
+</html>
