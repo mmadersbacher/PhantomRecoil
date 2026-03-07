@@ -91,6 +91,13 @@ input:focus-visible {
   color: var(--text-muted);
 }
 
+.app-version {
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
 .status {
   margin-top: 16px;
   font-size: 11px;

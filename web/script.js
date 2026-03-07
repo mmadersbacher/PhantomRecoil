@@ -13,6 +13,12 @@ let lastTabSwitchAt = 0;
 let renderInProgress = false;
 let renderQueued = false;
 let diagIntervalId = null;
+let perfIntervalId = null;
+let capsRequestInFlight = false;
+let heartbeatInFlight = false;
+let appInfoLoaded = false;
+let lastClientEventAt = 0;
+const CLIENT_EVENT_MIN_INTERVAL_MS = 400;
 
 // DOM Elements
 const grid = document.getElementById('operators-grid');
@@ -77,9 +83,51 @@ function sendClientEvent(level, message, context) {
         return;
     }
 
+    const now = Date.now();
+    if (level !== 'error' && now - lastClientEventAt < CLIENT_EVENT_MIN_INTERVAL_MS) {
+        return;
+    }
+    lastClientEventAt = now;
+
     window.pywebview.api.log_client_event(level, message, context || {}).catch(() => {
         // Ignore telemetry failures to keep UI path non-blocking.
     });
+}
+
+function updateVersionLabel(appInfo) {
+    const versionEl = document.getElementById('app-version');
+    if (!versionEl) {
+        return;
+    }
+
+    const version = String((appInfo && appInfo.version) || '').trim();
+    if (!version) {
+        versionEl.textContent = '';
+        return;
+    }
+    versionEl.textContent = version;
+}
+
+function fetchAppInfo() {
+    if (!isPyWebViewAvailable() || appInfoLoaded) {
+        return;
+    }
+
+    window.pywebview.api.get_app_info()
+        .then((info) => {
+            appInfoLoaded = true;
+            if (info && typeof info.title === 'string' && info.title.length > 0) {
+                document.title = info.title;
+            }
+            updateVersionLabel(info || {});
+            sendClientEvent('info', 'app info loaded', {
+                version: info && info.version,
+                session: info && info.session_id,
+            });
+        })
+        .catch((err) => {
+            console.error('[PyWebView API Error] get_app_info failed', err);
+        });
 }
 
 function startDiagnosticHeartbeat() {
@@ -95,6 +143,12 @@ function startDiagnosticHeartbeat() {
             return;
         }
 
+        if (heartbeatInFlight) {
+            return;
+        }
+
+        heartbeatInFlight = true;
+
         window.pywebview.api.ping({
             tab: currentTab,
             searchLength: searchQuery.length,
@@ -103,8 +157,10 @@ function startDiagnosticHeartbeat() {
             ts: Date.now(),
         }).catch(() => {
             // Avoid recursive error loops on a failing bridge.
+        }).finally(() => {
+            heartbeatInFlight = false;
         });
-    }, 2000);
+    }, 3000);
 }
 
 function stopDiagnosticHeartbeat() {
@@ -149,19 +205,60 @@ function startCapsPolling() {
             setStatusIndicator(false);
             return;
         }
+
+        if (capsRequestInFlight) {
+            return;
+        }
+
+        capsRequestInFlight = true;
+
         window.pywebview.api.get_caps_state()
             .then((isOn) => setStatusIndicator(Boolean(isOn)))
             .catch((err) => {
                 console.error('[PyWebView API Error] get_caps_state failed', err);
                 setStatusIndicator(false);
+            })
+            .finally(() => {
+                capsRequestInFlight = false;
             });
-    }, 500);
+    }, 900);
 }
 
 function stopCapsPolling() {
     if (capsPollIntervalId !== null) {
         window.clearInterval(capsPollIntervalId);
         capsPollIntervalId = null;
+    }
+    capsRequestInFlight = false;
+}
+
+function startPerformanceMonitor() {
+    if (perfIntervalId !== null) {
+        return;
+    }
+
+    let expectedTs = Date.now() + 1000;
+    perfIntervalId = window.setInterval(() => {
+        const now = Date.now();
+        const drift = now - expectedTs;
+        expectedTs = now + 1000;
+
+        if (drift > 600) {
+            sendClientEvent('warning', 'Event loop lag detected', {
+                driftMs: drift,
+                tab: currentTab,
+                renderInProgress,
+                renderQueued,
+                searchLength: searchQuery.length,
+            });
+        }
+    }, 1000);
+}
+
+function stopPerformanceMonitor() {
+    if (perfIntervalId !== null) {
+        window.clearInterval(perfIntervalId);
+        perfIntervalId = null;
     }
 }
 
@@ -588,8 +685,10 @@ window.addEventListener('unhandledrejection', (event) => {
 window.addEventListener('pywebviewready', () => {
     pywebviewReady = true;
     sendClientEvent('info', 'pywebview ready', {});
+    fetchAppInfo();
     startDiagnosticHeartbeat();
     startCapsPolling();
+    startPerformanceMonitor();
     if (intensitySlider) {
         sendMultiplierToBackend(intensitySlider.value);
     }
@@ -598,12 +697,15 @@ window.addEventListener('pywebviewready', () => {
 window.addEventListener('beforeunload', () => {
     stopDiagnosticHeartbeat();
     stopCapsPolling();
+    stopPerformanceMonitor();
     pywebviewReady = false;
 });
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeUI();
     if (pywebviewReady) {
+        fetchAppInfo();
         startCapsPolling();
+        startPerformanceMonitor();
     }
 });

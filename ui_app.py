@@ -9,15 +9,32 @@ import sys
 import updater
 import math
 import logging
+import logging.handlers
 import tempfile
 import time
 import json
 import faulthandler
+import traceback
+import platform
+import uuid
 
 
 logger = logging.getLogger(__name__)
 DIAGNOSTIC_MODE = True
 DIAGNOSTIC_DUMP_SECONDS = 45
+PROCESS_SNAPSHOT_SECONDS = 10
+APP_TITLE = f"Phantom Recoil {updater.__version__}"
+
+
+def _safe_process_memory_mb():
+    """Best effort process memory read for Windows diagnostics."""
+    try:
+        import psutil  # type: ignore
+
+        rss_bytes = psutil.Process(os.getpid()).memory_info().rss
+        return round(rss_bytes / (1024 * 1024), 2)
+    except Exception:
+        return None
 
 
 def get_diagnostic_log_path():
@@ -38,7 +55,12 @@ def setup_logging():
     root.setLevel(logging.INFO)
     root.handlers.clear()
 
-    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding='utf-8',
+    )
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
 
@@ -49,13 +71,41 @@ def setup_logging():
     logger.info('[Startup] Diagnostic log file: %s', log_path)
     return log_path
 
+
+def install_crash_hooks():
+    """Capture uncaught exceptions from main and worker threads in diagnostics."""
+
+    def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+        logger.critical(
+            '[Crash] Uncaught exception: %s\n%s',
+            exc_value,
+            ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)),
+        )
+
+    sys.excepthook = handle_uncaught_exception
+
+    def handle_thread_exception(args):
+        logger.critical(
+            '[Crash] Uncaught thread exception in %s: %s\n%s',
+            getattr(args.thread, 'name', 'unknown-thread'),
+            args.exc_value,
+            ''.join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)),
+        )
+
+    if hasattr(threading, 'excepthook'):
+        threading.excepthook = handle_thread_exception
+
 class Api:
     def __init__(self):
         self.macro = RecoilMacro()
         self.window = None
+        self.session_id = str(uuid.uuid4())
+        self.started_at = time.time()
         self.last_ping_ts = time.time()
         self.last_ping_payload = None
         self._ping_lock = threading.Lock()
+
+        logger.info('[Startup] Session=%s | App=%s | Python=%s | Platform=%s', self.session_id, APP_TITLE, sys.version.split()[0], platform.platform())
         
         # Start the background polling thread.
         self.macro_thread = threading.Thread(target=self.macro.start, daemon=True)
@@ -103,6 +153,14 @@ class Api:
             self.last_ping_payload = payload
         return {'ok': True, 'ts': self.last_ping_ts}
 
+    def get_app_info(self):
+        """Provides app metadata to the frontend for diagnostics and version labels."""
+        return {
+            'title': APP_TITLE,
+            'version': updater.__version__,
+            'session_id': self.session_id,
+        }
+
     def log_client_event(self, level='info', message='', context=None):
         safe_message = str(message or '')[:300]
         safe_context = context if isinstance(context, dict) else {}
@@ -129,6 +187,10 @@ class Api:
             'since_ping_seconds': round(since_ping, 3),
             'last_ping_payload': payload,
             'macro': self.macro.get_state_snapshot(),
+            'uptime_seconds': round(time.time() - self.started_at, 3),
+            'threads': threading.active_count(),
+            'memory_mb': _safe_process_memory_mb(),
+            'session_id': self.session_id,
         }
 
     def shutdown(self):
@@ -144,6 +206,7 @@ class Api:
 
 def start_diagnostic_watchdog(api):
     def watchdog_loop():
+        last_snapshot_ts = 0.0
         while True:
             try:
                 time.sleep(5)
@@ -151,6 +214,19 @@ def start_diagnostic_watchdog(api):
                 since_ping = status['since_ping_seconds']
                 if since_ping > 15:
                     logger.warning('[Diag] Frontend heartbeat stale: %.2fs | macro=%s', since_ping, status['macro'])
+                    # Force immediate thread dump when UI heartbeat stalls.
+                    faulthandler.dump_traceback(all_threads=True)
+
+                now = time.time()
+                if now - last_snapshot_ts >= PROCESS_SNAPSHOT_SECONDS:
+                    last_snapshot_ts = now
+                    logger.info(
+                        '[Diag] Snapshot session=%s uptime=%.2fs threads=%s memory_mb=%s',
+                        status['session_id'],
+                        status['uptime_seconds'],
+                        status['threads'],
+                        status['memory_mb'],
+                    )
             except Exception as err:
                 logger.exception('[Diag] Watchdog failure: %s', err)
 
@@ -160,6 +236,7 @@ def start_diagnostic_watchdog(api):
 
 if __name__ == '__main__':
     log_path = setup_logging()
+    install_crash_hooks()
 
     if DIAGNOSTIC_MODE:
         try:
@@ -211,7 +288,7 @@ if __name__ == '__main__':
     elif icon_file:
         logger.info("[Startup] pywebview does not support 'icon' parameter. Continuing without custom icon.")
 
-    window = webview.create_window('Phantom Recoil', **window_kwargs)
+    window = webview.create_window(APP_TITLE, **window_kwargs)
     api.set_window(window)
 
     # Ensure background loop is stopped when the UI is closed.

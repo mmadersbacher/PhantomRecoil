@@ -19,6 +19,28 @@ class TestApiValidation(unittest.TestCase):
 
         api.shutdown()
 
+    def test_app_info_includes_version_and_title(self):
+        api = Api()
+        info = api.get_app_info()
+
+        self.assertIn('version', info)
+        self.assertIn('title', info)
+        self.assertIn('session_id', info)
+        self.assertTrue(str(info['version']).startswith('v'))
+        self.assertIn(str(info['version']), str(info['title']))
+
+        api.shutdown()
+
+    def test_diag_status_contains_runtime_metadata(self):
+        api = Api()
+        status = api.get_diag_status()
+
+        self.assertIn('uptime_seconds', status)
+        self.assertIn('threads', status)
+        self.assertIn('session_id', status)
+
+        api.shutdown()
+
 
 if __name__ == '__main__':
     unittest.main()
