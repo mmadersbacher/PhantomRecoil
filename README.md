@@ -33,7 +33,7 @@ Most recoil helpers are either throwaway scripts or hard to maintain long-term. 
 - Favorites and search for quick access.
 - Icon fetching with local cache fallback behavior.
 - Stable tab switching and preserved scroll behavior on selection.
-- Built-in update checks against official releases.
+- Built-in auto-update checks and silent apply on startup.
 - Installer + portable release assets.
 
 ## SEO Section
@@ -135,6 +135,7 @@ PhantomRecoil/
 2. Download latest setup:
 	 - `PhantomRecoilSetup_vX.Y.Z.exe`
 3. Run installer and complete setup.
+   - Default install path: `%LOCALAPPDATA%\Programs\Phantom Recoil` (no admin rights required).
 4. Launch from Start Menu: `Phantom Recoil`.
 
 ### Portable Path (No Installation)
@@ -161,6 +162,8 @@ Get-FileHash .\Phantom_Recoil_Standalone.exe -Algorithm SHA256
 ```
 
 Hashes must match `SHA256SUMS.txt`.
+
+For auto-update channel metadata, each release also publishes `latest.json`.
 
 If signing is enabled:
 
@@ -210,6 +213,7 @@ Expected outputs:
 - `Phantom_Recoil_Standalone.exe`
 - `PhantomRecoilSetup_vX.Y.Z.exe`
 - `SHA256SUMS.txt`
+- `latest.json`
 
 ### Run Built App
 
@@ -234,7 +238,8 @@ Pipeline stages:
 4. Standalone build
 5. Installer build
 6. SHA256 generation
-7. Artifact publishing
+7. `latest.json` manifest generation
+8. Artifact publishing
 
 ## Signing Helper (Optional)
 
@@ -286,4 +291,3 @@ Suggested workflow:
 ## Support the Project
 
 If Phantom Recoil helps you, star the repository so more users can discover it.
-

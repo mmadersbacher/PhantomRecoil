@@ -1,12 +1,12 @@
 #define AppName "Phantom Recoil"
 #ifndef AppVersion
-  #define AppVersion "1.0.22"
+  #define AppVersion "1.0.23"
 #endif
 #ifndef SignedUninstallerMode
   #define SignedUninstallerMode "no"
 #endif
 #define AppPublisher "mmadersbacher"
-#define AppURL "https://github.com/mmadersbacher/RainbowSixRecoil"
+#define AppURL "https://github.com/mmadersbacher/PhantomRecoil"
 #define AppExeName "Phantom_Recoil_Standalone.exe"
 
 #ifexist "dist\\Phantom_Recoil_Standalone.exe"
@@ -23,7 +23,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}/releases
-DefaultDirName={autopf}\\{#AppName}
+DefaultDirName={localappdata}\\Programs\\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 LicenseFile=

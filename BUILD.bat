@@ -104,6 +104,23 @@ if errorlevel 1 (
     )
 )
 
+echo [System] Generating latest.json update manifest...
+for /f %%V in ('python -c "import re, pathlib; t=pathlib.Path('updater.py').read_text(encoding='utf-8'); m=re.search(r'__version__\s*=\s*\"(v\d+\.\d+\.\d+)\"', t); print(m.group(1) if m else '')"') do set APP_TAG=%%V
+if "%APP_TAG%"=="" (
+    echo [WARN] Failed to detect app version from updater.py. Skipping latest.json.
+) else (
+    if exist "SHA256SUMS.txt" (
+        python generate_latest_manifest.py --version "%APP_TAG%" --repo "mmadersbacher/PhantomRecoil" --portable "Phantom_Recoil_Standalone.exe" --checksums "SHA256SUMS.txt" --output "latest.json"
+    ) else (
+        python generate_latest_manifest.py --version "%APP_TAG%" --repo "mmadersbacher/PhantomRecoil" --portable "Phantom_Recoil_Standalone.exe" --output "latest.json"
+    )
+    if errorlevel 1 (
+        echo [WARN] Failed to generate latest.json.
+    ) else (
+        echo [System] Wrote update manifest: latest.json
+    )
+)
+
 rmdir /s /q build
 rmdir /s /q dist
 

@@ -15,6 +15,7 @@
    - `Phantom_Recoil_Standalone.exe`
    - `PhantomRecoilSetup_vX.Y.Z.exe`
    - `SHA256SUMS.txt`
+   - `latest.json`
 4. Smoke test executable startup:
    - Start EXE and ensure process launches without immediate crash.
 5. Smoke test installer:
@@ -26,6 +27,7 @@
    - `PhantomRecoilSetup_vX.Y.Z.exe`
    - `Phantom_Recoil_Standalone.exe`
    - `SHA256SUMS.txt`
+   - `latest.json`
 3. In release notes, include:
    - SHA256 verification instruction
    - security note: download only from official repository releases
@@ -48,4 +50,4 @@
 2. Verify checksum with PowerShell:
    - `Get-FileHash .\PhantomRecoilSetup_vX.Y.Z.exe -Algorithm SHA256`
    - `Get-FileHash .\Phantom_Recoil_Standalone.exe -Algorithm SHA256`
-3. Confirm updater notification opens official release page only.
+3. Confirm updater applies update automatically on startup (no browser redirect).
