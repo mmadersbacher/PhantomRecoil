@@ -3,8 +3,6 @@ import threading
 import os
 import inspect
 from macro import RecoilMacro
-import win32con
-import ctypes
 import sys
 import updater
 import math
