@@ -212,6 +212,30 @@ class Api:
             return {'ok': False, 'error': str(err)}
         return {'ok': True, 'reason': safe_reason}
 
+    def get_system_info(self):
+        """Return Windows mouse system settings relevant to recoil accuracy."""
+        from macro import get_pointer_speed, get_enhance_pointer_precision, POINTER_SPEED_DEFAULT
+        pointer_speed = get_pointer_speed()
+        epp = get_enhance_pointer_precision()
+        warnings = []
+        if pointer_speed != POINTER_SPEED_DEFAULT:
+            warnings.append(
+                f'Windows pointer speed is {pointer_speed}/20 (default is {POINTER_SPEED_DEFAULT}/20). '
+                'This affects recoil compensation strength. Set it to the default (6th notch) for correct results.'
+            )
+        if epp:
+            warnings.append(
+                'Enhance Pointer Precision (mouse acceleration) is ON. '
+                'This makes recoil compensation inconsistent — disable it in Windows mouse settings.'
+            )
+        logger.info("[Backend] System info requested: pointer_speed=%s epp=%s", pointer_speed, epp)
+        return {
+            'pointer_speed': pointer_speed,
+            'pointer_speed_default': POINTER_SPEED_DEFAULT,
+            'enhance_pointer_precision': epp,
+            'warnings': warnings,
+        }
+
     def get_hotkey(self):
         """Return current hotkey VK code and name."""
         from macro import VK_NAMES

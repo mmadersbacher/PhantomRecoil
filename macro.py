@@ -32,6 +32,80 @@ R6_PROCESS_NAMES = frozenset({'RainbowSix.exe', 'RainbowSix_Vulkan.exe'})
 # How often (seconds) to re-check if R6 is running.
 GAME_CHECK_INTERVAL = 5.0
 
+# Windows SystemParametersInfo codes for pointer settings.
+_SPI_GETMOUSESPEED = 0x0070
+_SPI_GETMOUSE = 0x0003
+
+# Default Windows pointer speed (corresponds to 6/11 on the slider).
+POINTER_SPEED_DEFAULT = 10
+
+
+# ── SendInput structures ──────────────────────────────────────────────────────
+# SendInput is the modern, preferred API over the deprecated mouse_event().
+# It bypasses some legacy input filtering and is more reliable across
+# different Windows versions and anti-cheat configurations.
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ('dx',          ctypes.c_long),
+        ('dy',          ctypes.c_long),
+        ('mouseData',   ctypes.c_ulong),
+        ('dwFlags',     ctypes.c_ulong),
+        ('time',        ctypes.c_ulong),
+        ('dwExtraInfo', ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = [('mi', _MOUSEINPUT)]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [
+        ('type',   ctypes.c_ulong),
+        ('_input', _INPUT_UNION),
+    ]
+
+
+_INPUT_MOUSE = 0
+_MOUSEEVENTF_MOVE = 0x0001
+
+
+def _send_relative_mouse_move(dx: int, dy: int) -> None:
+    """Inject a relative mouse movement via SendInput (modern replacement for mouse_event)."""
+    inp = _INPUT(type=_INPUT_MOUSE)
+    inp._input.mi = _MOUSEINPUT(
+        dx=dx,
+        dy=dy,
+        mouseData=0,
+        dwFlags=_MOUSEEVENTF_MOVE,
+        time=0,
+        dwExtraInfo=None,
+    )
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+
+
+# ── Windows system info helpers ───────────────────────────────────────────────
+
+def get_pointer_speed() -> int:
+    """Read the Windows pointer speed setting (1–20, default 10 = 6/11 on slider)."""
+    try:
+        speed = ctypes.c_int(POINTER_SPEED_DEFAULT)
+        ctypes.windll.user32.SystemParametersInfoW(_SPI_GETMOUSESPEED, 0, ctypes.byref(speed), 0)
+        return int(speed.value)
+    except Exception:
+        return POINTER_SPEED_DEFAULT
+
+
+def get_enhance_pointer_precision() -> bool:
+    """Return True if 'Enhance Pointer Precision' (mouse acceleration) is enabled."""
+    try:
+        params = (ctypes.c_int * 3)()
+        ctypes.windll.user32.SystemParametersInfoW(_SPI_GETMOUSE, 0, params, 0)
+        return bool(params[2])
+    except Exception:
+        return False
+
 
 class RecoilMacro:
     def __init__(self):
@@ -180,7 +254,7 @@ class RecoilMacro:
 
                             # Only move mouse if there's actually a full pixel to move.
                             if move_x != 0 or move_y != 0:
-                                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, move_x, move_y, 0, 0)
+                                _send_relative_mouse_move(move_x, move_y)
                                 self.accumulated_x -= move_x
                                 self.accumulated_y -= move_y
 

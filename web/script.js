@@ -17,11 +17,15 @@ const KEY_TO_VK = {
     F9: 0x78, F10: 0x79, F11: 0x7A, F12: 0x7B,
 };
 
+// Reference sensitivity the recoil profiles are calibrated for (R6S default).
+const REFERENCE_SENSITIVITY = 50;
+
 // State
 let currentTab = 'attackers';
 let searchQuery = '';
 let favorites = loadFavorites();
 let userDpi = loadDpi();
+let userSensitivity = loadSensitivity();
 let weaponIntensityMap = loadWeaponIntensityMap();
 let selectedOperator = null;
 let selectedWeapon = null;
@@ -54,6 +58,7 @@ const tabBtns = document.querySelectorAll('.tab-btn');
 const intensitySlider = document.getElementById('intensity');
 const intensityVal = document.getElementById('intensity-val');
 const dpiInput = document.getElementById('dpi-input');
+const sensitivityInput = document.getElementById('sensitivity-input');
 
 function loadFavorites() {
     try {
@@ -98,6 +103,31 @@ function saveDpi(value) {
     localStorage.setItem('r6_dpi', String(userDpi));
     if (dpiInput) {
         dpiInput.value = String(userDpi);
+    }
+}
+
+function clampSensitivity(value) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) {
+        return REFERENCE_SENSITIVITY;
+    }
+    return Math.max(1, Math.min(200, parsed));
+}
+
+function loadSensitivity() {
+    try {
+        return clampSensitivity(localStorage.getItem('r6_sensitivity') || String(REFERENCE_SENSITIVITY));
+    } catch (err) {
+        console.warn('[Storage] Invalid sensitivity found, using default.', err);
+        return REFERENCE_SENSITIVITY;
+    }
+}
+
+function saveSensitivity(value) {
+    userSensitivity = clampSensitivity(value);
+    localStorage.setItem('r6_sensitivity', String(userSensitivity));
+    if (sensitivityInput) {
+        sensitivityInput.value = String(userSensitivity);
     }
 }
 
@@ -347,6 +377,7 @@ function exportSettings() {
         version: 1,
         favorites,
         dpi: userDpi,
+        sensitivity: userSensitivity,
         weaponIntensityMap,
         hotkeyVk: currentHotkeyVk,
     };
@@ -376,6 +407,7 @@ function importSettings(file) {
             }
 
             if (data.dpi !== undefined) saveDpi(data.dpi);
+            if (data.sensitivity !== undefined) saveSensitivity(data.sensitivity);
 
             if (data.weaponIntensityMap && typeof data.weaponIntensityMap === 'object') {
                 const cleaned = {};
@@ -436,6 +468,51 @@ function maybeRequestDiagDump(reason, context) {
         })
         .catch((err) => {
             console.error('[PyWebView API Error] dump_diagnostics failed', err);
+        });
+}
+
+function fetchAndShowSystemWarnings() {
+    if (!isPyWebViewAvailable()) return;
+
+    window.pywebview.api.get_system_info()
+        .then((info) => {
+            if (!info || !Array.isArray(info.warnings) || info.warnings.length === 0) return;
+            const banner = document.getElementById('system-warning-banner');
+            if (!banner) return;
+
+            banner.innerHTML = '';
+            const icon = document.createElement('span');
+            icon.className = 'material-icons-outlined';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = 'warning';
+
+            const text = document.createElement('div');
+            text.className = 'system-warning-text';
+            info.warnings.forEach((msg) => {
+                const p = document.createElement('p');
+                p.textContent = msg;
+                text.appendChild(p);
+            });
+
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'system-warning-close';
+            closeBtn.type = 'button';
+            closeBtn.setAttribute('aria-label', 'Dismiss warning');
+            closeBtn.textContent = '✕';
+            closeBtn.addEventListener('click', () => { banner.style.display = 'none'; });
+
+            banner.appendChild(icon);
+            banner.appendChild(text);
+            banner.appendChild(closeBtn);
+            banner.style.display = 'flex';
+
+            sendClientEvent('warning', 'system warnings detected', {
+                pointer_speed: info.pointer_speed,
+                epp: info.enhance_pointer_precision,
+            });
+        })
+        .catch((err) => {
+            console.warn('[PyWebView API] get_system_info failed', err);
         });
 }
 
@@ -694,9 +771,13 @@ function selectWeapon(operator, weapon) {
 
     updateSidebarSelection(operator, weapon);
 
+    // DPI scaling: profiles are calibrated at 400 DPI.
+    // Sensitivity scaling: profiles are calibrated at sensitivity=50 (R6S default).
+    // Higher in-game sensitivity → crosshair moves more per pixel → less mouse compensation needed.
     const dpiMultiplier = 400 / clampDpi(userDpi);
-    const scaledX = Number(weapon.x) * dpiMultiplier;
-    const scaledY = Number(weapon.y) * dpiMultiplier;
+    const sensMultiplier = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
+    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
+    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
 
     if (isPyWebViewAvailable()) {
         window.pywebview.api.set_recoil(scaledX, scaledY).catch((err) => {
@@ -1078,6 +1159,16 @@ function initializeUI() {
         });
     }
 
+    if (sensitivityInput) {
+        sensitivityInput.value = String(userSensitivity);
+        sensitivityInput.addEventListener('change', (event) => {
+            saveSensitivity(event.target.value);
+            if (selectedOperator && selectedWeapon) {
+                selectWeapon(selectedOperator, selectedWeapon);
+            }
+        });
+    }
+
     const hotkeyCaptureBtn = document.getElementById('hotkey-capture-btn');
     if (hotkeyCaptureBtn) {
         hotkeyCaptureBtn.addEventListener('click', () => {
@@ -1132,6 +1223,7 @@ window.addEventListener('pywebviewready', () => {
     pywebviewReady = true;
     sendClientEvent('info', 'pywebview ready', {});
     fetchAppInfo();
+    fetchAndShowSystemWarnings();
     startDiagnosticHeartbeat();
     startHotkeyPolling();
     startPerformanceMonitor();

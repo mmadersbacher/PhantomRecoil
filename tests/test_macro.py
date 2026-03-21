@@ -1,6 +1,7 @@
 import unittest
+from unittest import mock
 
-from macro import RecoilMacro
+from macro import RecoilMacro, get_pointer_speed, get_enhance_pointer_precision, POINTER_SPEED_DEFAULT
 import win32con
 
 
@@ -53,6 +54,51 @@ class TestRecoilMacroValidation(unittest.TestCase):
         self.assertIn('game_running', snapshot)
         self.assertEqual(snapshot['hotkey_vk'], 0x72)
         self.assertEqual(snapshot['hotkey_name'], 'F3')
+
+
+class TestSendInput(unittest.TestCase):
+    def test_send_relative_mouse_move_calls_sendinput(self):
+        """SendInput should be invoked with one event of type INPUT_MOUSE."""
+        import macro as _macro
+        with mock.patch.object(_macro.ctypes.windll.user32, 'SendInput') as mock_send:
+            _macro._send_relative_mouse_move(3, 5)
+            self.assertTrue(mock_send.called)
+            call_args = mock_send.call_args
+            # First arg is count=1
+            self.assertEqual(call_args[0][0], 1)
+
+    def test_send_relative_mouse_move_zero_is_valid(self):
+        """Zero-delta move should still call SendInput without raising."""
+        import macro as _macro
+        with mock.patch.object(_macro.ctypes.windll.user32, 'SendInput'):
+            _macro._send_relative_mouse_move(0, 0)  # must not raise
+
+
+class TestSystemInfo(unittest.TestCase):
+    def test_get_pointer_speed_returns_int_in_range(self):
+        speed = get_pointer_speed()
+        self.assertIsInstance(speed, int)
+        self.assertGreaterEqual(speed, 1)
+        self.assertLessEqual(speed, 20)
+
+    def test_get_pointer_speed_fallback_on_api_error(self):
+        import macro as _macro
+        with mock.patch.object(_macro.ctypes.windll.user32, 'SystemParametersInfoW', side_effect=OSError):
+            speed = get_pointer_speed()
+        self.assertEqual(speed, POINTER_SPEED_DEFAULT)
+
+    def test_get_enhance_pointer_precision_returns_bool(self):
+        result = get_enhance_pointer_precision()
+        self.assertIsInstance(result, bool)
+
+    def test_get_enhance_pointer_precision_fallback_on_api_error(self):
+        import macro as _macro
+        with mock.patch.object(_macro.ctypes.windll.user32, 'SystemParametersInfoW', side_effect=OSError):
+            result = get_enhance_pointer_precision()
+        self.assertFalse(result)
+
+    def test_pointer_speed_default_constant(self):
+        self.assertEqual(POINTER_SPEED_DEFAULT, 10)
 
 
 if __name__ == '__main__':

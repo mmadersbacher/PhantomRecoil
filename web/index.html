@@ -32,6 +32,12 @@
         </div>
 
         <div class="setting-item">
+          <label for="sensitivity-input">In-Game Sensitivity (Ref: 50)</label>
+          <input type="number" id="sensitivity-input" value="50" min="1" max="200" step="1" aria-describedby="sensitivity-help">
+          <p class="help-text" id="sensitivity-help">R6S default is 50. Higher = less pull needed.</p>
+        </div>
+
+        <div class="setting-item">
           <label for="intensity">Recoil Intensity (Smoothness)</label>
           <div class="slider-container">
             <input type="range" id="intensity" min="0.01" max="1.0" step="0.01" value="0.50" aria-describedby="intensity-help intensity-val">
@@ -99,6 +105,7 @@
   </div>
 
   <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+  <div id="system-warning-banner" class="system-warning-banner" role="alert" aria-live="assertive" style="display:none"></div>
 
   <script src="data.js"></script>
   <script src="script.js"></script>

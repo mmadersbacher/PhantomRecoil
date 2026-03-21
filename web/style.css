@@ -1123,3 +1123,63 @@ input[type='range']::-moz-range-thumb {
     display: none !important;
   }
 }
+
+/* ── System warning banner ───────────────────────────────────────────────── */
+.system-warning-banner {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #2a2100;
+  border: 1px solid var(--warning);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  max-width: 680px;
+  width: calc(100% - 32px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  color: var(--text-main);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.system-warning-banner .material-icons-outlined {
+  color: var(--warning);
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.system-warning-text {
+  flex: 1;
+}
+
+.system-warning-text p {
+  margin: 0 0 4px 0;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.system-warning-text p:last-child {
+  margin-bottom: 0;
+}
+
+.system-warning-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: color var(--transition-fast);
+}
+
+.system-warning-close:hover {
+  color: var(--text-main);
+}
