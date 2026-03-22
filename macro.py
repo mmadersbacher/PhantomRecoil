@@ -200,81 +200,100 @@ class RecoilMacro:
 
     def start(self):
         """Starts the main polling loop for mouse events."""
+        # Request 1ms Windows timer resolution so time.sleep(0.002) is accurate.
+        # Default resolution is 15.625ms — without this, sleep(0.002) actually
+        # sleeps ~15ms, firing mouse moves at ~67Hz instead of ~400Hz, causing
+        # visible jitter and weak-feeling compensation on machines where no other
+        # software (game, audio driver) has already lowered the resolution.
+        _timer_set = False
+        try:
+            if ctypes.windll.winmm.timeBeginPeriod(1) == 0:  # TIMERR_NOERROR = 0
+                _timer_set = True
+        except Exception:
+            logger.warning("[Macro] Could not set timer resolution to 1ms — jitter may occur on some machines.")
+
         with self._state_lock:
             self.running = True
 
-        while True:
-            with self._state_lock:
-                if not self.running:
-                    break
-                hotkey_vk = self.hotkey_vk
-            try:
-                # Periodically verify that R6 Siege is actually running.
-                now = time.time()
-                if now - self._last_game_check >= GAME_CHECK_INTERVAL:
-                    self._last_game_check = now
-                    self._game_running = self._is_game_running()
-                    if not self._game_running:
-                        logger.info("[Macro] R6 Siege not detected — macro suspended.")
-
-                if not self._game_running:
-                    with self._state_lock:
-                        self.is_active = False
-                    time.sleep(0.5)
-                    continue
-
-                # GetKeyState via ctypes ignores the thread message pump limitations.
-                hotkey_active = self._check_hotkey_active(hotkey_vk)
+        try:
+            while True:
                 with self._state_lock:
-                    self.is_active = hotkey_active
-                    recoil_x = self.recoil_x
-                    recoil_y = self.recoil_y
-                    multiplier = self.multiplier
+                    if not self.running:
+                        break
+                    hotkey_vk = self.hotkey_vk
+                try:
+                    # Periodically verify that R6 Siege is actually running.
+                    now = time.time()
+                    if now - self._last_game_check >= GAME_CHECK_INTERVAL:
+                        self._last_game_check = now
+                        self._game_running = self._is_game_running()
+                        if not self._game_running:
+                            logger.info("[Macro] R6 Siege not detected — macro suspended.")
 
-                if hotkey_active:
-                    # Check if Right Mouse Button is pressed (Aiming).
-                    rmb_pressed = win32api.GetAsyncKeyState(win32con.VK_RBUTTON) < 0
+                    if not self._game_running:
+                        with self._state_lock:
+                            self.is_active = False
+                        time.sleep(0.5)
+                        continue
 
-                    if rmb_pressed:
-                        # Check if Left Mouse Button is pressed (Shooting).
-                        lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
+                    # GetKeyState via ctypes ignores the thread message pump limitations.
+                    hotkey_active = self._check_hotkey_active(hotkey_vk)
+                    with self._state_lock:
+                        self.is_active = hotkey_active
+                        recoil_x = self.recoil_x
+                        recoil_y = self.recoil_y
+                        multiplier = self.multiplier
 
-                        if lmb_pressed:
-                            # Original Lua logic: MoveMouseRelative(recoilX - 1, recoilY)
-                            # We apply the multiplier to lessen aggressive pulling.
-                            dx_target = (recoil_x - 1) * multiplier
-                            dy_target = recoil_y * multiplier
+                    if hotkey_active:
+                        # Check if Right Mouse Button is pressed (Aiming).
+                        rmb_pressed = win32api.GetAsyncKeyState(win32con.VK_RBUTTON) < 0
 
-                            # Accumulate decimals to ensure smooth slow pull instead of jitter.
-                            self.accumulated_x += dx_target
-                            self.accumulated_y += dy_target
+                        if rmb_pressed:
+                            # Check if Left Mouse Button is pressed (Shooting).
+                            lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
 
-                            move_x = int(self.accumulated_x)
-                            move_y = int(self.accumulated_y)
+                            if lmb_pressed:
+                                # Original Lua logic: MoveMouseRelative(recoilX - 1, recoilY)
+                                # We apply the multiplier to lessen aggressive pulling.
+                                dx_target = (recoil_x - 1) * multiplier
+                                dy_target = recoil_y * multiplier
 
-                            # Only move mouse if there's actually a full pixel to move.
-                            if move_x != 0 or move_y != 0:
-                                _send_relative_mouse_move(move_x, move_y)
-                                self.accumulated_x -= move_x
-                                self.accumulated_y -= move_y
+                                # Accumulate decimals to ensure smooth slow pull instead of jitter.
+                                self.accumulated_x += dx_target
+                                self.accumulated_y += dy_target
 
-                            # Random sleep between 2 and 3 ms as per Lua script: Sleep(math.random(2,3))
-                            time.sleep(random.uniform(0.002, 0.003))
-                            continue
+                                move_x = int(self.accumulated_x)
+                                move_y = int(self.accumulated_y)
 
-                    # Reset accumulators if not actively firing.
-                    self.accumulated_x = 0.0
-                    self.accumulated_y = 0.0
+                                # Only move mouse if there's actually a full pixel to move.
+                                if move_x != 0 or move_y != 0:
+                                    _send_relative_mouse_move(move_x, move_y)
+                                    self.accumulated_x -= move_x
+                                    self.accumulated_y -= move_y
 
-                    # Keep aim-ready mode responsive, but avoid spinning too aggressively.
-                    time.sleep(0.002)
+                                # Random sleep between 2 and 3 ms as per Lua script: Sleep(math.random(2,3))
+                                time.sleep(random.uniform(0.002, 0.003))
+                                continue
+
+                        # Reset accumulators if not actively firing.
+                        self.accumulated_x = 0.0
+                        self.accumulated_y = 0.0
+
+                        # Keep aim-ready mode responsive, but avoid spinning too aggressively.
+                        time.sleep(0.002)
+                        continue
+
+                    # Hotkey is off: use a slower poll to reduce background CPU pressure.
+                    time.sleep(0.006)
                     continue
+                except Exception as e:
+                    logger.exception("[Macro Error] Polling loop failure: %s", e)
 
-                # Hotkey is off: use a slower poll to reduce background CPU pressure.
-                time.sleep(0.006)
-                continue
-            except Exception as e:
-                logger.exception("[Macro Error] Polling loop failure: %s", e)
-
-            # Sleep 1ms to prevent 100% CPU utilization after an exception.
-            time.sleep(0.001)
+                # Sleep 1ms to prevent 100% CPU utilization after an exception.
+                time.sleep(0.001)
+        finally:
+            if _timer_set:
+                try:
+                    ctypes.windll.winmm.timeEndPeriod(1)
+                except Exception:
+                    pass

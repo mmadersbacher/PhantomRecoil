@@ -1,6 +1,6 @@
 #define AppName "Phantom Recoil"
 #ifndef AppVersion
-  #define AppVersion "1.0.27"
+  #define AppVersion "1.0.28"
 #endif
 #ifndef SignedUninstallerMode
   #define SignedUninstallerMode "no"
