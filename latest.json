@@ -1,16 +1,16 @@
 {
-  "version": "v1.0.28",
-  "notes": "Fix recoil jitter on machines with default Windows timer resolution (15.625ms -> 1ms)",
+  "version": "v1.0.29",
+  "notes": "Fix jitter: thread priority + GIL interval + process priority + sleep accuracy diagnostic",
   "assets": [
     {
-      "name": "PhantomRecoilSetup_v1.0.28.exe",
-      "browser_download_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.28/PhantomRecoilSetup_v1.0.28.exe",
-      "sha256": "483aaf41e3b4cea7204155f46506468f808eb164fc5657aa07491bfb7cc8a713"
+      "name": "PhantomRecoilSetup_v1.0.29.exe",
+      "browser_download_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.29/PhantomRecoilSetup_v1.0.29.exe",
+      "sha256": "fd02cd92f806063df5a25013d96a6690bae2935bfc7bb4d42f9136b5031a09ac"
     },
     {
       "name": "Phantom_Recoil_Standalone.exe",
-      "browser_download_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.28/Phantom_Recoil_Standalone.exe",
-      "sha256": "d17708486bf97101ccde3948839bbdcb1ee65873289d3861d0b888060ab56717"
+      "browser_download_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.29/Phantom_Recoil_Standalone.exe",
+      "sha256": "250beb160ac1d377f812bce8d68b7551f262bfd7e85e9a68a01ec156442d00dc"
     }
   ]
 }
