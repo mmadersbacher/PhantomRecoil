@@ -1183,3 +1183,10 @@ input[type='range']::-moz-range-thumb {
 .system-warning-close:hover {
   color: var(--text-main);
 }
+
+/* ── Effective (scaled) recoil values in sidebar ────────────────────────── */
+.effective-values {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}

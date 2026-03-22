@@ -699,6 +699,10 @@ function sendMultiplierToBackend(value) {
     const safeValue = clampIntensity(value);
     intensityVal.textContent = `${safeValue.toFixed(2)}x`;
 
+    if (safeValue < 0.05) {
+        showToast('Intensity very low — compensation nearly inactive', 'error');
+    }
+
     if (isPyWebViewAvailable()) {
         window.pywebview.api.set_multiplier(safeValue).catch((err) => {
             console.error('[PyWebView API Error] set_multiplier failed', err);
@@ -708,12 +712,14 @@ function sendMultiplierToBackend(value) {
     return safeValue;
 }
 
-function updateSidebarSelection(operator, weapon) {
+function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     const avatarEl = document.getElementById('selected-op-initials');
     const selectedName = document.getElementById('selected-name');
     const selectedWeaponName = document.getElementById('selected-weapon');
     const valX = document.getElementById('val-x');
     const valY = document.getElementById('val-y');
+    const valEffX = document.getElementById('val-eff-x');
+    const valEffY = document.getElementById('val-eff-y');
 
     if (!avatarEl || !selectedName || !selectedWeaponName || !valX || !valY) {
         return;
@@ -750,6 +756,8 @@ function updateSidebarSelection(operator, weapon) {
     selectedWeaponName.textContent = weapon.name;
     valX.textContent = String(weapon.x);
     valY.textContent = String(weapon.y);
+    if (valEffX) valEffX.textContent = (scaledX !== undefined ? scaledX.toFixed(2) : '—');
+    if (valEffY) valEffY.textContent = (scaledY !== undefined ? scaledY.toFixed(2) : '—');
 }
 
 function selectWeapon(operator, weapon) {
@@ -769,8 +777,6 @@ function selectWeapon(operator, weapon) {
         sendMultiplierToBackend(nextIntensity);
     }
 
-    updateSidebarSelection(operator, weapon);
-
     // DPI scaling: profiles are calibrated at 400 DPI.
     // Sensitivity scaling: profiles are calibrated at sensitivity=50 (R6S default).
     // Higher in-game sensitivity → crosshair moves more per pixel → less mouse compensation needed.
@@ -778,6 +784,8 @@ function selectWeapon(operator, weapon) {
     const sensMultiplier = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
     const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
     const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
+
+    updateSidebarSelection(operator, weapon, scaledX, scaledY);
 
     if (isPyWebViewAvailable()) {
         window.pywebview.api.set_recoil(scaledX, scaledY).catch((err) => {
@@ -1244,9 +1252,10 @@ window.addEventListener('beforeunload', () => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Prevent scroll wheel from accidentally changing number inputs while the
-    // user scrolls through the operator list — a common browser UX pitfall.
-    document.querySelectorAll('input[type="number"]').forEach((input) => {
+    // Prevent scroll wheel from accidentally changing inputs while the user
+    // scrolls through the operator list — a common browser UX pitfall.
+    // Covers both number inputs (DPI, sensitivity) and the range slider (intensity).
+    document.querySelectorAll('input[type="number"], input[type="range"]').forEach((input) => {
         input.addEventListener('wheel', () => { input.blur(); }, { passive: true });
     });
 
