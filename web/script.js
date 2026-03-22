@@ -1244,6 +1244,12 @@ window.addEventListener('beforeunload', () => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Prevent scroll wheel from accidentally changing number inputs while the
+    // user scrolls through the operator list — a common browser UX pitfall.
+    document.querySelectorAll('input[type="number"]').forEach((input) => {
+        input.addEventListener('wheel', () => { input.blur(); }, { passive: true });
+    });
+
     initializeUI();
     if (pywebviewReady) {
         fetchAppInfo();
