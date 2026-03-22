@@ -213,10 +213,25 @@ class Api:
         return {'ok': True, 'reason': safe_reason}
 
     def get_system_info(self):
-        """Return Windows mouse system settings relevant to recoil accuracy."""
+        """Return Windows system settings relevant to recoil accuracy."""
         from macro import get_pointer_speed, get_enhance_pointer_precision, POINTER_SPEED_DEFAULT
         pointer_speed = get_pointer_speed()
         epp = get_enhance_pointer_precision()
+
+        # Quick sleep benchmark: measure actual time.sleep(0.002) duration.
+        # If timer resolution is 15.625ms (Windows default), average will be ~15ms.
+        # If our timeBeginPeriod(1) fix is active, average should be ~2-3ms.
+        sleep_samples = []
+        for _ in range(5):
+            t0 = time.perf_counter()
+            time.sleep(0.002)
+            sleep_samples.append((time.perf_counter() - t0) * 1000)
+        avg_sleep_ms = round(sum(sleep_samples) / len(sleep_samples), 1)
+        timer_resolution_ok = avg_sleep_ms < 6.0  # anything < 6ms means 1ms resolution is active
+
+        timer_set = getattr(self._macro, 'timer_resolution_set', False)
+        thread_priority_set = getattr(self._macro, 'thread_priority_set', False)
+
         warnings = []
         if pointer_speed != POINTER_SPEED_DEFAULT:
             warnings.append(
@@ -228,12 +243,40 @@ class Api:
                 'Enhance Pointer Precision (mouse acceleration) is ON. '
                 'This makes recoil compensation inconsistent — disable it in Windows mouse settings.'
             )
-        logger.info("[Backend] System info requested: pointer_speed=%s epp=%s", pointer_speed, epp)
+        if not timer_resolution_ok:
+            warnings.append(
+                f'Timer resolution is low — sleep(2ms) is actually taking ~{avg_sleep_ms}ms on this machine. '
+                'This causes jitter and weak compensation. Restart the app; if this persists, '
+                'another application may be blocking the 1ms timer request.'
+            )
+        if not thread_priority_set:
+            warnings.append(
+                'Macro thread priority could not be boosted. Scheduling jitter is more likely.'
+            )
+
+        # Static in-game tips that should always be checked when compensation
+        # feels jittery or weak — these are R6S settings PhantomRecoil cannot
+        # detect automatically.
+        tips = [
+            'In R6S → Gameplay settings: set Mouse Filter = 0 and Mouse Smoothing = Off. '
+            'If either is enabled, the game temporal-averages all input including the macro, '
+            'causing delayed and jittery compensation.',
+        ]
+
+        logger.info(
+            "[Backend] System info: pointer_speed=%s epp=%s avg_sleep_ms=%s timer_ok=%s timer_set=%s",
+            pointer_speed, epp, avg_sleep_ms, timer_resolution_ok, timer_set,
+        )
         return {
             'pointer_speed': pointer_speed,
             'pointer_speed_default': POINTER_SPEED_DEFAULT,
             'enhance_pointer_precision': epp,
+            'avg_sleep_ms': avg_sleep_ms,
+            'timer_resolution_ok': timer_resolution_ok,
+            'timer_resolution_set': timer_set,
+            'thread_priority_set': thread_priority_set,
             'warnings': warnings,
+            'tips': tips,
         }
 
     def get_hotkey(self):
@@ -303,6 +346,20 @@ def start_diagnostic_watchdog(api):
 if __name__ == '__main__':
     log_path = setup_logging()
     install_crash_hooks()
+
+    # Boost process priority so Windows does not aggressively throttle us when a
+    # fullscreen game is running (Game Mode hands resources to the foreground game
+    # process, which can starve the macro thread on some configurations).
+    try:
+        import ctypes as _ctypes
+        _ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+        _ctypes.windll.kernel32.SetPriorityClass(
+            _ctypes.windll.kernel32.GetCurrentProcess(),
+            _ABOVE_NORMAL_PRIORITY_CLASS,
+        )
+        logger.info('[Startup] Process priority set to ABOVE_NORMAL.')
+    except Exception as _e:
+        logger.warning('[Startup] Could not set process priority: %s', _e)
 
     if DIAGNOSTIC_MODE:
         try:

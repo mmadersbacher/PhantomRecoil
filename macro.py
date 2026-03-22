@@ -126,6 +126,10 @@ class RecoilMacro:
         self._game_running = True   # optimistic default so macro works if psutil absent
         self._last_game_check = 0.0
 
+        # Scheduling diagnostics — set during start().
+        self.timer_resolution_set = False   # True if timeBeginPeriod(1) succeeded
+        self.thread_priority_set = False    # True if THREAD_PRIORITY_HIGHEST succeeded
+
     def _sanitize_number(self, value, default=0.0):
         try:
             number = float(value)
@@ -200,17 +204,45 @@ class RecoilMacro:
 
     def start(self):
         """Starts the main polling loop for mouse events."""
-        # Request 1ms Windows timer resolution so time.sleep(0.002) is accurate.
-        # Default resolution is 15.625ms — without this, sleep(0.002) actually
-        # sleeps ~15ms, firing mouse moves at ~67Hz instead of ~400Hz, causing
-        # visible jitter and weak-feeling compensation on machines where no other
-        # software (game, audio driver) has already lowered the resolution.
-        _timer_set = False
+        # ── Scheduling setup ─────────────────────────────────────────────────────
+        # Three layers are needed for precise 2ms loop timing on all machines:
+        #
+        # 1. timeBeginPeriod(1): reduces Windows timer quantum from default 15.625ms
+        #    to 1ms so time.sleep(0.002) actually sleeps ~2ms, not ~15ms.
+        #    Without this, mouse moves fire at ~67Hz (jitter) instead of ~400Hz.
+        #
+        # 2. THREAD_PRIORITY_HIGHEST: prevents OS preemption mid-tick. At normal
+        #    priority a game, AV scan, or GPU driver can delay this thread 5-20ms.
+        #
+        # 3. sys.setswitchinterval(0.001): reduces Python GIL check from 5ms to
+        #    1ms so the macro thread re-acquires the GIL quickly after sleep,
+        #    even if the UI thread is actively processing JS bridge calls.
+
         try:
             if ctypes.windll.winmm.timeBeginPeriod(1) == 0:  # TIMERR_NOERROR = 0
-                _timer_set = True
+                self.timer_resolution_set = True
+                logger.info("[Macro] Timer resolution set to 1ms.")
+            else:
+                logger.warning("[Macro] timeBeginPeriod(1) returned non-zero — falling back to system default.")
         except Exception:
-            logger.warning("[Macro] Could not set timer resolution to 1ms — jitter may occur on some machines.")
+            logger.warning("[Macro] Could not call timeBeginPeriod — winmm.dll unavailable.")
+
+        try:
+            _THREAD_PRIORITY_HIGHEST = 2
+            ctypes.windll.kernel32.SetThreadPriority(
+                ctypes.windll.kernel32.GetCurrentThread(), _THREAD_PRIORITY_HIGHEST
+            )
+            self.thread_priority_set = True
+            logger.info("[Macro] Thread priority set to HIGHEST.")
+        except Exception:
+            logger.warning("[Macro] Could not set thread priority.")
+
+        try:
+            import sys as _sys
+            _sys.setswitchinterval(0.001)
+            logger.info("[Macro] GIL switch interval set to 1ms.")
+        except Exception:
+            logger.warning("[Macro] Could not set GIL switch interval.")
 
         with self._state_lock:
             self.running = True
@@ -292,8 +324,9 @@ class RecoilMacro:
                 # Sleep 1ms to prevent 100% CPU utilization after an exception.
                 time.sleep(0.001)
         finally:
-            if _timer_set:
+            if self.timer_resolution_set:
                 try:
                     ctypes.windll.winmm.timeEndPeriod(1)
+                    logger.info("[Macro] Timer resolution released.")
                 except Exception:
                     pass

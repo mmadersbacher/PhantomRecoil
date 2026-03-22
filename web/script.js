@@ -476,23 +476,52 @@ function fetchAndShowSystemWarnings() {
 
     window.pywebview.api.get_system_info()
         .then((info) => {
-            if (!info || !Array.isArray(info.warnings) || info.warnings.length === 0) return;
+            const warnings = Array.isArray(info && info.warnings) ? info.warnings : [];
+            const tips = Array.isArray(info && info.tips) ? info.tips : [];
+            if (warnings.length === 0 && tips.length === 0) return;
+
             const banner = document.getElementById('system-warning-banner');
             if (!banner) return;
 
             banner.innerHTML = '';
-            const icon = document.createElement('span');
-            icon.className = 'material-icons-outlined';
-            icon.setAttribute('aria-hidden', 'true');
-            icon.textContent = 'warning';
 
-            const text = document.createElement('div');
-            text.className = 'system-warning-text';
-            info.warnings.forEach((msg) => {
-                const p = document.createElement('p');
-                p.textContent = msg;
-                text.appendChild(p);
-            });
+            if (warnings.length > 0) {
+                const icon = document.createElement('span');
+                icon.className = 'material-icons-outlined';
+                icon.setAttribute('aria-hidden', 'true');
+                icon.textContent = 'warning';
+
+                const text = document.createElement('div');
+                text.className = 'system-warning-text';
+                warnings.forEach((msg) => {
+                    const p = document.createElement('p');
+                    p.textContent = msg;
+                    text.appendChild(p);
+                });
+
+                banner.appendChild(icon);
+                banner.appendChild(text);
+            }
+
+            if (tips.length > 0) {
+                const tipIcon = document.createElement('span');
+                tipIcon.className = 'material-icons-outlined';
+                tipIcon.setAttribute('aria-hidden', 'true');
+                tipIcon.textContent = 'info';
+                tipIcon.style.opacity = '0.7';
+
+                const tipText = document.createElement('div');
+                tipText.className = 'system-warning-text';
+                tipText.style.opacity = '0.85';
+                tips.forEach((msg) => {
+                    const p = document.createElement('p');
+                    p.textContent = msg;
+                    tipText.appendChild(p);
+                });
+
+                banner.appendChild(tipIcon);
+                banner.appendChild(tipText);
+            }
 
             const closeBtn = document.createElement('button');
             closeBtn.className = 'system-warning-close';
@@ -500,15 +529,14 @@ function fetchAndShowSystemWarnings() {
             closeBtn.setAttribute('aria-label', 'Dismiss warning');
             closeBtn.textContent = '✕';
             closeBtn.addEventListener('click', () => { banner.style.display = 'none'; });
-
-            banner.appendChild(icon);
-            banner.appendChild(text);
             banner.appendChild(closeBtn);
             banner.style.display = 'flex';
 
             sendClientEvent('warning', 'system warnings detected', {
                 pointer_speed: info.pointer_speed,
                 epp: info.enhance_pointer_precision,
+                avg_sleep_ms: info.avg_sleep_ms,
+                timer_resolution_ok: info.timer_resolution_ok,
             });
         })
         .catch((err) => {
