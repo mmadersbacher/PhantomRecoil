@@ -90,11 +90,12 @@ def _inject_mouse(dx: int, dy: int) -> None:
 
 def calibrate(sct, monitor) -> tuple[float, float]:
     """
-    Inject CALIB_UNITS mouse counts horizontally, measure the resulting
-    pixel shift via optical flow, return (px_per_unit_x, px_per_unit_y).
+    Inject CALIB_UNITS mouse counts horizontally AND vertically, measure the
+    resulting pixel shift via optical flow, return (px_per_unit_x, px_per_unit_y).
 
     Must be called while R6S is in focus and the player is ADS at a wall,
     so the injected movement registers in-game at the correct ADS sensitivity.
+    H and V sensitivities may differ, so each axis is calibrated independently.
     """
     h, w = monitor['height'], monitor['width']
     cy, cx = h // 2, w // 2
@@ -103,6 +104,7 @@ def calibrate(sct, monitor) -> tuple[float, float]:
     scope_mask = np.ones((h, w), dtype=np.uint8) * 255
     scope_mask[cy - h//4 : cy + h//4, cx - w//4 : cx + w//4] = 0
 
+    # ── X-axis calibration ────────────────────────────────────────────────
     frame_before = np.array(sct.grab(monitor))[:, :, :3]
     time.sleep(0.04)
 
@@ -110,23 +112,39 @@ def calibrate(sct, monitor) -> tuple[float, float]:
     time.sleep(0.12)
 
     frame_after = np.array(sct.grab(monitor))[:, :, :3]
-
-    # Restore position
     _inject_mouse(-CALIB_UNITS, 0)
     time.sleep(0.12)
 
-    dx_px, dy_px = _optical_flow(frame_before, frame_after, scope_mask)
+    dx_px, _ = _optical_flow(frame_before, frame_after, scope_mask)
 
     if abs(dx_px) < 1.0:
-        print("  WARNING: Calibration shift too small – is R6S focused and in ADS? Using fallback 1.0.")
-        return 1.0, 1.0
+        print("  WARNING: X calibration shift too small – is R6S focused and in ADS? Using fallback 1.0.")
+        px_per_unit_x = 1.0
+    else:
+        px_per_unit_x = dx_px / CALIB_UNITS
+        print(f"  X: Injected {CALIB_UNITS} units → {dx_px:.1f} px  ({px_per_unit_x:.5f} px/unit)")
 
-    px_per_unit_x = dx_px / CALIB_UNITS
-    # dy_px should be near 0 for a horizontal injection; keep y conversion symmetric
-    px_per_unit_y = abs(px_per_unit_x)
+    # ── Y-axis calibration ────────────────────────────────────────────────
+    time.sleep(0.15)
+    frame_before = np.array(sct.grab(monitor))[:, :, :3]
+    time.sleep(0.04)
 
-    print(f"  Injected {CALIB_UNITS} units → {dx_px:.1f} px horizontal")
-    print(f"  Conversion: {px_per_unit_x:.5f} px/unit")
+    _inject_mouse(0, CALIB_UNITS)
+    time.sleep(0.12)
+
+    frame_after = np.array(sct.grab(monitor))[:, :, :3]
+    _inject_mouse(0, -CALIB_UNITS)
+    time.sleep(0.12)
+
+    _, dy_px = _optical_flow(frame_before, frame_after, scope_mask)
+
+    if abs(dy_px) < 1.0:
+        print("  WARNING: Y calibration shift too small – using X value as fallback.")
+        px_per_unit_y = abs(px_per_unit_x)
+    else:
+        px_per_unit_y = dy_px / CALIB_UNITS
+        print(f"  Y: Injected {CALIB_UNITS} units → {dy_px:.1f} px  ({px_per_unit_y:.5f} px/unit)")
+
     return px_per_unit_x, px_per_unit_y
 
 
@@ -189,10 +207,10 @@ def _optical_flow(frame1: np.ndarray, frame2: np.ndarray,
 
 # ── Main capture & analysis ───────────────────────────────────────────────────
 
-def run(weapon: str, dpi: int, sensitivity: int, rpm: int | None) -> None:
+def run(weapon: str, dpi: int, h_sensitivity: int, v_sensitivity: int, rpm: int | None) -> None:
     print(f"\n{'='*55}")
     print(f"  Weapon : {weapon}")
-    print(f"  DPI    : {dpi}   Sensitivity : {sensitivity}")
+    print(f"  DPI    : {dpi}   H-Sensitivity : {h_sensitivity}   V-Sensitivity : {v_sensitivity}")
     print(f"  RPM    : {rpm or 'auto-detect via flash timing'}")
     print(f"{'='*55}\n")
 
@@ -260,8 +278,14 @@ def run(weapon: str, dpi: int, sensitivity: int, rpm: int | None) -> None:
 
         ticks_per_shot = (60000 / rpm_used) / TICK_MS
 
-        # Scale factor to convert from recording settings to reference settings
-        ref_scale = (REFERENCE_DPI / dpi) * (REFERENCE_SENS / sensitivity)
+        # Scale factor to convert from recording settings to reference settings.
+        # At lower sensitivity the view moves less per mouse unit, so the raw pixel
+        # displacement is smaller. We scale UP to what the displacement would be at
+        # the reference settings so the output values match what data.js expects.
+        # Formula: (measured_sens / ref_sens) cancels the sensitivity difference.
+        # DPI scaling works the same way: higher DPI → more pixels per unit → scale down.
+        ref_scale_x = (dpi / REFERENCE_DPI) * (h_sensitivity / REFERENCE_SENS)
+        ref_scale_y = (dpi / REFERENCE_DPI) * (v_sensitivity / REFERENCE_SENS)
 
         # Scope mask for flow measurement
         cy, cx = h // 2, w // 2
@@ -285,9 +309,9 @@ def run(weapon: str, dpi: int, sensitivity: int, rpm: int | None) -> None:
             dx_units = dx_px / px_per_unit_x if px_per_unit_x != 0 else 0.0
             dy_units = dy_px / px_per_unit_y if px_per_unit_y != 0 else 0.0
 
-            # Scale to reference settings
-            dx_units *= ref_scale
-            dy_units *= ref_scale
+            # Scale to reference settings (applied independently per axis)
+            dx_units *= ref_scale_x
+            dy_units *= ref_scale_y
 
             # Convert total-per-shot displacement to per-tick value (weapon.y format)
             weapon_x_raw = dx_units / ticks_per_shot
@@ -311,7 +335,7 @@ def run(weapon: str, dpi: int, sensitivity: int, rpm: int | None) -> None:
         # Save JSON
         output = {
             "weapon": weapon,
-            "recording": {"dpi": dpi, "sensitivity": sensitivity, "rpm": rpm_used},
+            "recording": {"dpi": dpi, "h_sensitivity": h_sensitivity, "v_sensitivity": v_sensitivity, "rpm": rpm_used},
             "calibration": {"px_per_unit_x": px_per_unit_x, "px_per_unit_y": px_per_unit_y},
             "ticks_per_shot": round(ticks_per_shot, 1),
             "pattern": pattern,
@@ -331,21 +355,24 @@ def main() -> None:
     print("║       R6S Recoil Pattern Analyzer  v1.0             ║")
     print("╚══════════════════════════════════════════════════════╝")
     print()
-    print("IMPORTANT – use these settings in R6S during measurement:")
-    print("  DPI: 400  |  In-Game Sensitivity: 50  |  ADS: 100%  |  H/V: 100")
-    print("  (These are the reference values. Tool will auto-scale for other settings.)")
+    print("You can record at ANY DPI / H-Sensitivity / V-Sensitivity.")
+    print("The tool will auto-scale the measured values to the reference settings")
+    print("(DPI 400, H-Sens 50, V-Sens 50) so they work directly in data.js.")
+    print("Enter the exact values you currently have set in R6S.")
     print()
 
-    weapon    = input("Weapon name (e.g. AK-12): ").strip() or "Unknown"
-    dpi_s     = input("DPI used during recording [400]: ").strip()
-    sens_s    = input("In-Game Sensitivity used [50]: ").strip()
-    rpm_s     = input("Weapon RPM (leave blank to auto-detect from flash timing): ").strip()
+    weapon  = input("Weapon name (e.g. AK-12): ").strip() or "Unknown"
+    dpi_s   = input("DPI used during recording [400]: ").strip()
+    hsens_s = input("In-Game H-Sensitivity used [50]: ").strip()
+    vsens_s = input("In-Game V-Sensitivity used [50]: ").strip()
+    rpm_s   = input("Weapon RPM (leave blank to auto-detect from flash timing): ").strip()
 
-    dpi  = int(dpi_s)  if dpi_s  else 400
-    sens = int(sens_s) if sens_s else 50
-    rpm  = int(rpm_s)  if rpm_s  else None
+    dpi   = int(dpi_s)   if dpi_s   else 400
+    hsens = int(hsens_s) if hsens_s else 50
+    vsens = int(vsens_s) if vsens_s else 50
+    rpm   = int(rpm_s)   if rpm_s   else None
 
-    run(weapon, dpi, sens, rpm)
+    run(weapon, dpi, hsens, vsens, rpm)
 
 
 if __name__ == "__main__":

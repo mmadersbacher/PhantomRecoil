@@ -834,6 +834,140 @@ function sendMultiplierToBackend(value) {
     return safeValue;
 }
 
+// ── Recoil pattern rendering ───────────────────────────────────────────────────
+
+const _RC_START = [103, 178, 112]; // green
+const _RC_MID   = [200, 158,  65]; // amber
+const _RC_END   = [207,  79,  70]; // red
+
+function _rcLerp(a, b, t) {
+    return `rgb(${Math.round(a[0]+(b[0]-a[0])*t)},${Math.round(a[1]+(b[1]-a[1])*t)},${Math.round(a[2]+(b[2]-a[2])*t)})`;
+}
+
+function _rcColor(t) {
+    return t < 0.5 ? _rcLerp(_RC_START, _RC_MID, t * 2) : _rcLerp(_RC_MID, _RC_END, (t - 0.5) * 2);
+}
+
+function _rcPoints(weapon, shots) {
+    // raw recoil per shot: horizontal = (1 - weapon.x) * TICKS, vertical up = weapon.y * TICKS
+    // TICKS = ~32 (~750 RPM at 2.5 ms tick)
+    const TICKS = 32;
+    const dx = (1 - Number(weapon.x)) * TICKS;
+    const dy = Number(weapon.y) * TICKS;
+    const pts = [];
+    let cx = 0, cy = 0;
+    for (let i = 0; i < shots; i++) { pts.push({ x: cx, y: cy }); cx += dx; cy += dy; }
+    return pts;
+}
+
+function drawRecoilPattern(canvas, weapon) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const Wc  = canvas.clientWidth  || 240;
+    const Hc  = canvas.clientHeight || 112;
+    canvas.width  = Wc * dpr;
+    canvas.height = Hc * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const W = Wc, H = Hc;
+
+    // background
+    ctx.fillStyle = '#08080600';
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#070705';
+    ctx.fillRect(0, 0, W, H);
+
+    // grid
+    ctx.strokeStyle = 'rgba(255,245,218,0.048)';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i < 6; i++) { ctx.beginPath(); ctx.moveTo(W*i/6,0); ctx.lineTo(W*i/6,H); ctx.stroke(); }
+    for (let i = 1; i < 5; i++) { ctx.beginPath(); ctx.moveTo(0,H*i/5); ctx.lineTo(W,H*i/5); ctx.stroke(); }
+
+    // centre guide
+    ctx.strokeStyle = 'rgba(255,245,218,0.10)';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const SHOTS = 30;
+    const pts = _rcPoints(weapon, SHOTS);
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMax = Math.max(...ys, 1);
+    const PAD = 16;
+    const xRange = Math.max(xMax - xMin, yMax * (W / H) * 0.28, 1);
+    const scale  = Math.min((W - PAD*2) / xRange, (H - PAD*2) / yMax);
+    const ox = W/2 - ((xMin+xMax)/2) * scale;
+    const oy = H - PAD;
+    const tp = p => ({ x: ox + p.x * scale, y: oy - p.y * scale });
+
+    // connecting lines
+    for (let i = 0; i < pts.length - 1; i++) {
+        const t = i / (pts.length - 1);
+        ctx.strokeStyle = _rcColor(t) + 'a0';
+        ctx.lineWidth = 0.9;
+        const a = tp(pts[i]), b = tp(pts[i+1]);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+
+    // dots + shot labels
+    ctx.font = '7px var(--font-mono, monospace)';
+    pts.forEach((pt, i) => {
+        const t  = i / (pts.length - 1);
+        const { x, y } = tp(pt);
+        ctx.beginPath();
+        ctx.arc(x, y, i === 0 ? 3.5 : 1.9, 0, Math.PI * 2);
+        ctx.fillStyle = _rcColor(t);
+        ctx.fill();
+        if (i === 0 || (i + 1) % 5 === 0) {
+            ctx.fillStyle = 'rgba(255,245,218,0.42)';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(i + 1), x, y - 5);
+        }
+    });
+
+    // crosshair on shot 1
+    const { x: sx, y: sy } = tp(pts[0]);
+    ctx.strokeStyle = 'rgba(255,245,218,0.52)';
+    ctx.lineWidth = 0.8;
+    const CS = 5;
+    ctx.beginPath(); ctx.moveTo(sx-CS, sy); ctx.lineTo(sx+CS, sy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx, sy-CS); ctx.lineTo(sx, sy+CS); ctx.stroke();
+
+    // watermark label
+    ctx.fillStyle = 'rgba(255,245,218,0.14)';
+    ctx.font = '7px var(--font-mono, monospace)';
+    ctx.textAlign = 'left';
+    ctx.fillText('RECOIL PATTERN  ·  30 SHOTS', PAD, 10);
+}
+
+function drawMiniSparkline(canvas, weapon) {
+    const W = canvas.width, H = canvas.height;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    const SHOTS = 18;
+    const pts = _rcPoints(weapon, SHOTS);
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMax = Math.max(...ys, 1);
+    const PAD = 1;
+    const xRange = Math.max(xMax - xMin, yMax * (W / H) * 0.28, 1);
+    const scale  = Math.min((W - PAD*2) / xRange, (H - PAD*2) / yMax);
+    const ox = W/2 - ((xMin+xMax)/2) * scale;
+    const oy = H - PAD;
+    const tp = p => ({ x: ox + p.x * scale, y: oy - p.y * scale });
+    for (let i = 0; i < pts.length - 1; i++) {
+        const t = i / (pts.length - 1);
+        ctx.strokeStyle = _rcColor(t);
+        ctx.lineWidth = 1.4;
+        const a = tp(pts[i]), b = tp(pts[i+1]);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    const { x, y } = tp(pts[0]);
+    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgb(${_RC_START.join(',')})`;
+    ctx.fill();
+}
+
 function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     const avatarEl = document.getElementById('selected-op-initials');
     const selectedName = document.getElementById('selected-name');
@@ -880,6 +1014,12 @@ function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     valY.textContent = String(weapon.y);
     if (valEffX) valEffX.textContent = (scaledX !== undefined ? scaledX.toFixed(2) : '—');
     if (valEffY) valEffY.textContent = (scaledY !== undefined ? scaledY.toFixed(2) : '—');
+
+    const chart = document.getElementById('recoil-chart');
+    if (chart) {
+        chart.classList.remove('empty');
+        requestAnimationFrame(() => drawRecoilPattern(chart, weapon));
+    }
 }
 
 function selectWeapon(operator, weapon) {
@@ -997,8 +1137,20 @@ function createWeaponButton(operator, weapon) {
     stats.className = 'weapon-stats';
     stats.textContent = `X${weapon.x} Y${weapon.y}`;
 
+    const sparkCanvas = document.createElement('canvas');
+    sparkCanvas.className = 'weapon-sparkline';
+    sparkCanvas.width = 46;
+    sparkCanvas.height = 22;
+    sparkCanvas.setAttribute('aria-hidden', 'true');
+    drawMiniSparkline(sparkCanvas, weapon);
+
+    const right = document.createElement('div');
+    right.className = 'weapon-btn-right';
+    right.appendChild(sparkCanvas);
+    right.appendChild(stats);
+
     btn.appendChild(left);
-    btn.appendChild(stats);
+    btn.appendChild(right);
     btn.addEventListener('click', () => selectWeapon(operator, weapon));
 
     return btn;
@@ -1435,6 +1587,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('input[type="number"], input[type="range"]').forEach((input) => {
         input.addEventListener('wheel', () => { input.blur(); }, { passive: true });
     });
+
+    const chart = document.getElementById('recoil-chart');
+    if (chart) chart.classList.add('empty');
 
     initializeUI();
     if (pywebviewReady) {
