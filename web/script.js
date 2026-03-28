@@ -17,7 +17,7 @@ const KEY_TO_VK = {
     F9: 0x78, F10: 0x79, F11: 0x7A, F12: 0x7B,
 };
 
-// Effective ADS sensitivity at which the recoil profiles are calibrated (R6S: hipfire 50 × ADS 100% = 50).
+// Reference sensitivity the recoil profiles are calibrated for (R6S default).
 const REFERENCE_SENSITIVITY = 50;
 
 // State
@@ -26,11 +26,6 @@ let searchQuery = '';
 let favorites = loadFavorites();
 let userDpi = loadDpi();
 let userSensitivity = loadSensitivity();
-let userHSens = loadHSens();
-let userVSens = loadVSens();
-let adsSens1x = loadAdsSens1x();
-let adsSens25x = loadAdsSens25x();
-let currentScope = loadScope();
 let weaponIntensityMap = loadWeaponIntensityMap();
 let selectedOperator = null;
 let selectedWeapon = null;
@@ -111,10 +106,11 @@ function saveDpi(value) {
     }
 }
 
-
 function clampSensitivity(value) {
     const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return REFERENCE_SENSITIVITY;
+    if (!Number.isFinite(parsed)) {
+        return REFERENCE_SENSITIVITY;
+    }
     return Math.max(1, Math.min(200, parsed));
 }
 
@@ -130,86 +126,9 @@ function loadSensitivity() {
 function saveSensitivity(value) {
     userSensitivity = clampSensitivity(value);
     localStorage.setItem('r6_sensitivity', String(userSensitivity));
-    if (sensitivityInput) sensitivityInput.value = String(userSensitivity);
-}
-
-function clampHVSens(value) {
-    const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return 100;
-    return Math.max(1, Math.min(200, parsed));
-}
-
-function loadHSens() {
-    try {
-        return clampHVSens(localStorage.getItem('r6_h_sens') || '100');
-    } catch (err) {
-        return 100;
+    if (sensitivityInput) {
+        sensitivityInput.value = String(userSensitivity);
     }
-}
-
-function saveHSens(value) {
-    userHSens = clampHVSens(value);
-    localStorage.setItem('r6_h_sens', String(userHSens));
-}
-
-function loadVSens() {
-    try {
-        return clampHVSens(localStorage.getItem('r6_v_sens') || '100');
-    } catch (err) {
-        return 100;
-    }
-}
-
-function saveVSens(value) {
-    userVSens = clampHVSens(value);
-    localStorage.setItem('r6_v_sens', String(userVSens));
-}
-
-function clampAdsSens(value) {
-    const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return 50;
-    return Math.max(1, Math.min(100, parsed));
-}
-
-function loadAdsSens1x() {
-    try {
-        return clampAdsSens(localStorage.getItem('r6_ads_sens_1x') || '50');
-    } catch (err) {
-        return 50;
-    }
-}
-
-function saveAdsSens1x(value) {
-    adsSens1x = clampAdsSens(value);
-    localStorage.setItem('r6_ads_sens_1x', String(adsSens1x));
-}
-
-function loadAdsSens25x() {
-    try {
-        return clampAdsSens(localStorage.getItem('r6_ads_sens_25x') || '50');
-    } catch (err) {
-        return 50;
-    }
-}
-
-function saveAdsSens25x(value) {
-    adsSens25x = clampAdsSens(value);
-    localStorage.setItem('r6_ads_sens_25x', String(adsSens25x));
-}
-
-function loadScope() {
-    try {
-        const raw = localStorage.getItem('r6_scope');
-        if (raw === '1x' || raw === '2.5x') return raw;
-        return 'none';
-    } catch (err) {
-        return 'none';
-    }
-}
-
-function saveScope(value) {
-    currentScope = value;
-    localStorage.setItem('r6_scope', value);
 }
 
 function clampIntensity(value) {
@@ -459,11 +378,6 @@ function exportSettings() {
         favorites,
         dpi: userDpi,
         sensitivity: userSensitivity,
-        hSens: userHSens,
-        vSens: userVSens,
-        adsSens1x,
-        adsSens25x,
-        scope: currentScope,
         weaponIntensityMap,
         hotkeyVk: currentHotkeyVk,
     };
@@ -494,14 +408,6 @@ function importSettings(file) {
 
             if (data.dpi !== undefined) saveDpi(data.dpi);
             if (data.sensitivity !== undefined) saveSensitivity(data.sensitivity);
-            if (data.hSens !== undefined) saveHSens(data.hSens);
-            if (data.vSens !== undefined) saveVSens(data.vSens);
-            if (data.adsSens1x !== undefined) saveAdsSens1x(data.adsSens1x);
-            if (data.adsSens25x !== undefined) saveAdsSens25x(data.adsSens25x);
-            if (data.scope !== undefined) {
-                const s = String(data.scope);
-                if (s === '1x' || s === '2.5x' || s === 'none') saveScope(s);
-            }
 
             if (data.weaponIntensityMap && typeof data.weaponIntensityMap === 'object') {
                 const cleaned = {};
@@ -834,140 +740,6 @@ function sendMultiplierToBackend(value) {
     return safeValue;
 }
 
-// ── Recoil pattern rendering ───────────────────────────────────────────────────
-
-const _RC_START = [103, 178, 112]; // green
-const _RC_MID   = [200, 158,  65]; // amber
-const _RC_END   = [207,  79,  70]; // red
-
-function _rcLerp(a, b, t) {
-    return `rgb(${Math.round(a[0]+(b[0]-a[0])*t)},${Math.round(a[1]+(b[1]-a[1])*t)},${Math.round(a[2]+(b[2]-a[2])*t)})`;
-}
-
-function _rcColor(t) {
-    return t < 0.5 ? _rcLerp(_RC_START, _RC_MID, t * 2) : _rcLerp(_RC_MID, _RC_END, (t - 0.5) * 2);
-}
-
-function _rcPoints(weapon, shots) {
-    // raw recoil per shot: horizontal = (1 - weapon.x) * TICKS, vertical up = weapon.y * TICKS
-    // TICKS = ~32 (~750 RPM at 2.5 ms tick)
-    const TICKS = 32;
-    const dx = (1 - Number(weapon.x)) * TICKS;
-    const dy = Number(weapon.y) * TICKS;
-    const pts = [];
-    let cx = 0, cy = 0;
-    for (let i = 0; i < shots; i++) { pts.push({ x: cx, y: cy }); cx += dx; cy += dy; }
-    return pts;
-}
-
-function drawRecoilPattern(canvas, weapon) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const Wc  = canvas.clientWidth  || 240;
-    const Hc  = canvas.clientHeight || 96;
-    canvas.width  = Wc * dpr;
-    canvas.height = Hc * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    const W = Wc, H = Hc;
-
-    // background
-    ctx.fillStyle = '#08080600';
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#070705';
-    ctx.fillRect(0, 0, W, H);
-
-    // grid
-    ctx.strokeStyle = 'rgba(255,245,218,0.048)';
-    ctx.lineWidth = 0.5;
-    for (let i = 1; i < 6; i++) { ctx.beginPath(); ctx.moveTo(W*i/6,0); ctx.lineTo(W*i/6,H); ctx.stroke(); }
-    for (let i = 1; i < 5; i++) { ctx.beginPath(); ctx.moveTo(0,H*i/5); ctx.lineTo(W,H*i/5); ctx.stroke(); }
-
-    // centre guide
-    ctx.strokeStyle = 'rgba(255,245,218,0.10)';
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
-    ctx.setLineDash([]);
-
-    const SHOTS = 30;
-    const pts = _rcPoints(weapon, SHOTS);
-    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-    const xMin = Math.min(...xs), xMax = Math.max(...xs);
-    const yMax = Math.max(...ys, 1);
-    const PAD = 16;
-    const xRange = Math.max(xMax - xMin, yMax * (W / H) * 0.28, 1);
-    const scale  = Math.min((W - PAD*2) / xRange, (H - PAD*2) / yMax);
-    const ox = W/2 - ((xMin+xMax)/2) * scale;
-    const oy = H - PAD;
-    const tp = p => ({ x: ox + p.x * scale, y: oy - p.y * scale });
-
-    // connecting lines
-    for (let i = 0; i < pts.length - 1; i++) {
-        const t = i / (pts.length - 1);
-        ctx.strokeStyle = _rcColor(t) + 'a0';
-        ctx.lineWidth = 0.9;
-        const a = tp(pts[i]), b = tp(pts[i+1]);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
-
-    // dots + shot labels
-    ctx.font = '7px var(--font-mono, monospace)';
-    pts.forEach((pt, i) => {
-        const t  = i / (pts.length - 1);
-        const { x, y } = tp(pt);
-        ctx.beginPath();
-        ctx.arc(x, y, i === 0 ? 3.5 : 1.9, 0, Math.PI * 2);
-        ctx.fillStyle = _rcColor(t);
-        ctx.fill();
-        if (i === 0 || (i + 1) % 5 === 0) {
-            ctx.fillStyle = 'rgba(255,245,218,0.42)';
-            ctx.textAlign = 'center';
-            ctx.fillText(String(i + 1), x, y - 5);
-        }
-    });
-
-    // crosshair on shot 1
-    const { x: sx, y: sy } = tp(pts[0]);
-    ctx.strokeStyle = 'rgba(255,245,218,0.52)';
-    ctx.lineWidth = 0.8;
-    const CS = 5;
-    ctx.beginPath(); ctx.moveTo(sx-CS, sy); ctx.lineTo(sx+CS, sy); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(sx, sy-CS); ctx.lineTo(sx, sy+CS); ctx.stroke();
-
-    // watermark label
-    ctx.fillStyle = 'rgba(255,245,218,0.14)';
-    ctx.font = '7px var(--font-mono, monospace)';
-    ctx.textAlign = 'left';
-    ctx.fillText('RECOIL PATTERN  ·  30 SHOTS', PAD, 10);
-}
-
-function drawMiniSparkline(canvas, weapon) {
-    const W = canvas.width, H = canvas.height;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, W, H);
-    const SHOTS = 18;
-    const pts = _rcPoints(weapon, SHOTS);
-    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-    const xMin = Math.min(...xs), xMax = Math.max(...xs);
-    const yMax = Math.max(...ys, 1);
-    const PAD = 1;
-    const xRange = Math.max(xMax - xMin, yMax * (W / H) * 0.28, 1);
-    const scale  = Math.min((W - PAD*2) / xRange, (H - PAD*2) / yMax);
-    const ox = W/2 - ((xMin+xMax)/2) * scale;
-    const oy = H - PAD;
-    const tp = p => ({ x: ox + p.x * scale, y: oy - p.y * scale });
-    for (let i = 0; i < pts.length - 1; i++) {
-        const t = i / (pts.length - 1);
-        ctx.strokeStyle = _rcColor(t);
-        ctx.lineWidth = 1.4;
-        const a = tp(pts[i]), b = tp(pts[i+1]);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
-    const { x, y } = tp(pts[0]);
-    ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = `rgb(${_RC_START.join(',')})`;
-    ctx.fill();
-}
-
 function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     const avatarEl = document.getElementById('selected-op-initials');
     const selectedName = document.getElementById('selected-name');
@@ -1014,13 +786,6 @@ function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     valY.textContent = String(weapon.y);
     if (valEffX) valEffX.textContent = (scaledX !== undefined ? scaledX.toFixed(2) : '—');
     if (valEffY) valEffY.textContent = (scaledY !== undefined ? scaledY.toFixed(2) : '—');
-
-    const chart = document.getElementById('recoil-chart');
-    const placeholder = document.getElementById('recoil-chart-placeholder');
-    if (chart) {
-        if (placeholder) placeholder.style.display = 'none';
-        requestAnimationFrame(() => drawRecoilPattern(chart, weapon));
-    }
 }
 
 function selectWeapon(operator, weapon) {
@@ -1040,20 +805,13 @@ function selectWeapon(operator, weapon) {
         sendMultiplierToBackend(nextIntensity);
     }
 
-    // DPI scaling: calibrated at 400 DPI.
-    // Base sensitivity: calibrated at 50 (R6S default hipfire).
-    // ADS scope %: R6S ADS sensitivity (1–100, 100% = same as hipfire).
-    // H/V multiplier: separate horizontal/vertical scaling (100 = no change).
-    // X and Y axes are scaled independently.
+    // DPI scaling: profiles are calibrated at 400 DPI.
+    // Sensitivity scaling: profiles are calibrated at sensitivity=50 (R6S default).
+    // Higher in-game sensitivity → crosshair moves more per pixel → less mouse compensation needed.
     const dpiMultiplier = 400 / clampDpi(userDpi);
-    const baseSensMult = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
-    const adsScaleFactor = currentScope === '1x'
-        ? (100 / clampAdsSens(adsSens1x))
-        : currentScope === '2.5x'
-            ? (100 / clampAdsSens(adsSens25x))
-            : 1.0;
-    const scaledX = Number(weapon.x) * dpiMultiplier * baseSensMult * adsScaleFactor * (100 / clampHVSens(userHSens));
-    const scaledY = Number(weapon.y) * dpiMultiplier * baseSensMult * adsScaleFactor * (100 / clampHVSens(userVSens));
+    const sensMultiplier = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
+    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
+    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
 
     updateSidebarSelection(operator, weapon, scaledX, scaledY);
 
@@ -1108,7 +866,9 @@ function createWeaponButton(operator, weapon) {
     btn.dataset.weaponName = weapon.name;
 
     const left = document.createElement('div');
-    left.className = 'weapon-left';
+    left.style.display = 'flex';
+    left.style.alignItems = 'center';
+    left.style.gap = '8px';
 
     const weaponName = document.createElement('span');
     weaponName.className = 'weapon-name';
@@ -1121,7 +881,6 @@ function createWeaponButton(operator, weapon) {
         weaponImg.setAttribute('aria-hidden', 'true');
         weaponImg.style.width = '28px';
         weaponImg.style.height = '14px';
-        weaponImg.style.flexShrink = '0';
         weaponImg.loading = 'lazy';
         weaponImg.style.objectFit = 'contain';
         weaponImg.style.filter = 'drop-shadow(0 1px 1px rgba(0,0,0,0.8))';
@@ -1137,20 +896,8 @@ function createWeaponButton(operator, weapon) {
     stats.className = 'weapon-stats';
     stats.textContent = `X${weapon.x} Y${weapon.y}`;
 
-    const sparkCanvas = document.createElement('canvas');
-    sparkCanvas.className = 'weapon-sparkline';
-    sparkCanvas.width = 46;
-    sparkCanvas.height = 22;
-    sparkCanvas.setAttribute('aria-hidden', 'true');
-    drawMiniSparkline(sparkCanvas, weapon);
-
-    const right = document.createElement('div');
-    right.className = 'weapon-btn-right';
-    right.appendChild(sparkCanvas);
-    right.appendChild(stats);
-
     btn.appendChild(left);
-    btn.appendChild(right);
+    btn.appendChild(stats);
     btn.addEventListener('click', () => selectWeapon(operator, weapon));
 
     return btn;
@@ -1423,8 +1170,6 @@ function initializeUI() {
             event.currentTarget.classList.add('active');
             event.currentTarget.setAttribute('aria-selected', 'true');
             currentTab = nextTab;
-            const appContainer = document.querySelector('.app-container');
-            if (appContainer) appContainer.dataset.tab = currentTab;
             sendClientEvent('info', 'tab switch', { tab: currentTab });
             requestRender();
         });
@@ -1454,59 +1199,11 @@ function initializeUI() {
         sensitivityInput.value = String(userSensitivity);
         sensitivityInput.addEventListener('change', (event) => {
             saveSensitivity(event.target.value);
-            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
+            if (selectedOperator && selectedWeapon) {
+                selectWeapon(selectedOperator, selectedWeapon);
+            }
         });
     }
-
-    const hSensInputEl = document.getElementById('h-sens-input');
-    if (hSensInputEl) {
-        hSensInputEl.value = String(userHSens);
-        hSensInputEl.addEventListener('change', (event) => {
-            saveHSens(event.target.value);
-            hSensInputEl.value = String(userHSens);
-            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
-        });
-    }
-
-    const vSensInputEl = document.getElementById('v-sens-input');
-    if (vSensInputEl) {
-        vSensInputEl.value = String(userVSens);
-        vSensInputEl.addEventListener('change', (event) => {
-            saveVSens(event.target.value);
-            vSensInputEl.value = String(userVSens);
-            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
-        });
-    }
-
-    const adsSens1xInputEl = document.getElementById('ads-sens-1x-input');
-    if (adsSens1xInputEl) {
-        adsSens1xInputEl.value = String(adsSens1x);
-        adsSens1xInputEl.addEventListener('change', (event) => {
-            saveAdsSens1x(event.target.value);
-            adsSens1xInputEl.value = String(adsSens1x);
-            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
-        });
-    }
-
-    const adsSens25xInputEl = document.getElementById('ads-sens-25x-input');
-    if (adsSens25xInputEl) {
-        adsSens25xInputEl.value = String(adsSens25x);
-        adsSens25xInputEl.addEventListener('change', (event) => {
-            saveAdsSens25x(event.target.value);
-            adsSens25xInputEl.value = String(adsSens25x);
-            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
-        });
-    }
-
-    const scopeBtns = document.querySelectorAll('.scope-btn');
-    scopeBtns.forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.scope === currentScope);
-        btn.addEventListener('click', () => {
-            saveScope(btn.dataset.scope);
-            scopeBtns.forEach((b) => b.classList.toggle('active', b.dataset.scope === currentScope));
-            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
-        });
-    });
 
     const hotkeyCaptureBtn = document.getElementById('hotkey-capture-btn');
     if (hotkeyCaptureBtn) {

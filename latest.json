@@ -1,16 +1,18 @@
 {
-  "version": "v1.0.29",
-  "notes": "Fix jitter: thread priority + GIL interval + process priority + sleep accuracy diagnostic",
-  "assets": [
-    {
-      "name": "PhantomRecoilSetup_v1.0.29.exe",
-      "browser_download_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.29/PhantomRecoilSetup_v1.0.29.exe",
-      "sha256": "fd02cd92f806063df5a25013d96a6690bae2935bfc7bb4d42f9136b5031a09ac"
-    },
-    {
+  "version": "v1.0.33",
+  "release_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/tag/v1.0.33",
+  "generated_at_utc": "2026-03-28T15:38:23.545935+00:00",
+  "assets": {
+    "portable": {
       "name": "Phantom_Recoil_Standalone.exe",
-      "browser_download_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.29/Phantom_Recoil_Standalone.exe",
-      "sha256": "250beb160ac1d377f812bce8d68b7551f262bfd7e85e9a68a01ec156442d00dc"
+      "url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.33/Phantom_Recoil_Standalone.exe",
+      "sha256": "5c6a727be71a943e82529547920d58119411cfbf0286fb4cb87f13a4c158360f"
+    },
+    "installer": null,
+    "checksums": {
+      "name": "SHA256SUMS.txt",
+      "url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.33/SHA256SUMS.txt",
+      "sha256": "eebf13a2d902138f1578664d636a33d2b89798b0d8c32a31f299095ecb96c006"
     }
-  ]
+  }
 }
