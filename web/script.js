@@ -26,6 +26,9 @@ let searchQuery = '';
 let favorites = loadFavorites();
 let userDpi = loadDpi();
 let userSensitivity = loadSensitivity();
+let adsSens1x = loadAdsSens1x();
+let adsSens25x = loadAdsSens25x();
+let currentScope = loadScope();
 let weaponIntensityMap = loadWeaponIntensityMap();
 let selectedOperator = null;
 let selectedWeapon = null;
@@ -129,6 +132,53 @@ function saveSensitivity(value) {
     if (sensitivityInput) {
         sensitivityInput.value = String(userSensitivity);
     }
+}
+
+function clampAdsSens(value) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return 50;
+    return Math.max(1, Math.min(100, parsed));
+}
+
+function loadAdsSens1x() {
+    try {
+        return clampAdsSens(localStorage.getItem('r6_ads_sens_1x') || '50');
+    } catch (err) {
+        return 50;
+    }
+}
+
+function saveAdsSens1x(value) {
+    adsSens1x = clampAdsSens(value);
+    localStorage.setItem('r6_ads_sens_1x', String(adsSens1x));
+}
+
+function loadAdsSens25x() {
+    try {
+        return clampAdsSens(localStorage.getItem('r6_ads_sens_25x') || '50');
+    } catch (err) {
+        return 50;
+    }
+}
+
+function saveAdsSens25x(value) {
+    adsSens25x = clampAdsSens(value);
+    localStorage.setItem('r6_ads_sens_25x', String(adsSens25x));
+}
+
+function loadScope() {
+    try {
+        const raw = localStorage.getItem('r6_scope');
+        if (raw === '1x' || raw === '2.5x') return raw;
+        return 'none';
+    } catch (err) {
+        return 'none';
+    }
+}
+
+function saveScope(value) {
+    currentScope = value;
+    localStorage.setItem('r6_scope', value);
 }
 
 function clampIntensity(value) {
@@ -378,6 +428,9 @@ function exportSettings() {
         favorites,
         dpi: userDpi,
         sensitivity: userSensitivity,
+        adsSens1x,
+        adsSens25x,
+        scope: currentScope,
         weaponIntensityMap,
         hotkeyVk: currentHotkeyVk,
     };
@@ -408,6 +461,12 @@ function importSettings(file) {
 
             if (data.dpi !== undefined) saveDpi(data.dpi);
             if (data.sensitivity !== undefined) saveSensitivity(data.sensitivity);
+            if (data.adsSens1x !== undefined) saveAdsSens1x(data.adsSens1x);
+            if (data.adsSens25x !== undefined) saveAdsSens25x(data.adsSens25x);
+            if (data.scope !== undefined) {
+                const s = String(data.scope);
+                if (s === '1x' || s === '2.5x' || s === 'none') saveScope(s);
+            }
 
             if (data.weaponIntensityMap && typeof data.weaponIntensityMap === 'object') {
                 const cleaned = {};
@@ -808,10 +867,17 @@ function selectWeapon(operator, weapon) {
     // DPI scaling: profiles are calibrated at 400 DPI.
     // Sensitivity scaling: profiles are calibrated at sensitivity=50 (R6S default).
     // Higher in-game sensitivity → crosshair moves more per pixel → less mouse compensation needed.
+    // ADS scope scaling: R6S ADS sensitivity is 1–100 where 100 = same speed as hipfire.
+    // Lower ADS sens → slower cursor → need more mouse movement to compensate same recoil.
     const dpiMultiplier = 400 / clampDpi(userDpi);
     const sensMultiplier = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
-    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
-    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
+    const adsScaleFactor = currentScope === '1x'
+        ? (100 / clampAdsSens(adsSens1x))
+        : currentScope === '2.5x'
+            ? (100 / clampAdsSens(adsSens25x))
+            : 1.0;
+    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier * adsScaleFactor;
+    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier * adsScaleFactor;
 
     updateSidebarSelection(operator, weapon, scaledX, scaledY);
 
@@ -1204,6 +1270,36 @@ function initializeUI() {
             }
         });
     }
+
+    const adsSens1xInputEl = document.getElementById('ads-sens-1x-input');
+    if (adsSens1xInputEl) {
+        adsSens1xInputEl.value = String(adsSens1x);
+        adsSens1xInputEl.addEventListener('change', (event) => {
+            saveAdsSens1x(event.target.value);
+            adsSens1xInputEl.value = String(adsSens1x);
+            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
+        });
+    }
+
+    const adsSens25xInputEl = document.getElementById('ads-sens-25x-input');
+    if (adsSens25xInputEl) {
+        adsSens25xInputEl.value = String(adsSens25x);
+        adsSens25xInputEl.addEventListener('change', (event) => {
+            saveAdsSens25x(event.target.value);
+            adsSens25xInputEl.value = String(adsSens25x);
+            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
+        });
+    }
+
+    const scopeBtns = document.querySelectorAll('.scope-btn');
+    scopeBtns.forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.scope === currentScope);
+        btn.addEventListener('click', () => {
+            saveScope(btn.dataset.scope);
+            scopeBtns.forEach((b) => b.classList.toggle('active', b.dataset.scope === currentScope));
+            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
+        });
+    });
 
     const hotkeyCaptureBtn = document.getElementById('hotkey-capture-btn');
     if (hotkeyCaptureBtn) {

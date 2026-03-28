@@ -38,6 +38,26 @@
         </div>
 
         <div class="setting-item">
+          <label>ADS Scope Sensitivity</label>
+          <div class="scope-sens-row">
+            <div class="scope-sens-field">
+              <span class="scope-sens-label">1× Scope</span>
+              <input type="number" id="ads-sens-1x-input" value="50" min="1" max="100" step="1">
+            </div>
+            <div class="scope-sens-field">
+              <span class="scope-sens-label">2.5× Scope</span>
+              <input type="number" id="ads-sens-25x-input" value="50" min="1" max="100" step="1">
+            </div>
+          </div>
+          <div class="scope-toggle" role="group" aria-label="Active scope mode">
+            <button class="scope-btn active" data-scope="none" type="button">None</button>
+            <button class="scope-btn" data-scope="1x" type="button">1×</button>
+            <button class="scope-btn" data-scope="2.5x" type="button">2.5×</button>
+          </div>
+          <p class="help-text">Matches R6S ADS Sensitivity (1–100). Select active scope.</p>
+        </div>
+
+        <div class="setting-item">
           <label for="intensity">Recoil Intensity (Smoothness)</label>
           <div class="slider-container">
             <input type="range" id="intensity" min="0.01" max="1.0" step="0.01" value="0.50" aria-describedby="intensity-help intensity-val">
