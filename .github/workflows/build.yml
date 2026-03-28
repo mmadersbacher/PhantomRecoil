@@ -66,17 +66,12 @@ jobs:
       run: |
         $version = "v$env:APP_VERSION"
         $setupFile = "dist/PhantomRecoilSetup_v$env:APP_VERSION.exe"
-        $notes = "## Phantom Recoil $version`n`n**What's new:**`n- ADS scope sensitivity settings (1x / 2.5x) with correct DPI and sensitivity scaling`n- Scope mode toggle (None / 1x / 2.5x) in sidebar`n- Settings persisted and included in export/import`n`n**Downloads:**`n- **Installer** (recommended): ``PhantomRecoilSetup_v$env:APP_VERSION.exe```n- **Portable**: ``Phantom_Recoil_Standalone.exe```"
 
-        # Create release (ignore error if tag already exists)
-        $createOut = gh release create $version `
-          --title "Phantom Recoil $version" `
-          --notes $notes 2>&1
+        $result = gh release create $version --title "Phantom Recoil $version" --notes "ADS scope sensitivity (1x / 2.5x) toggle in sidebar with correct DPI and sensitivity scaling. Settings persisted and included in export/import." 2>&1
         if ($LASTEXITCODE -ne 0) {
-          Write-Host "Release already exists or creation issue, continuing with asset upload. Output: $createOut"
+          Write-Host "Note: $result"
         }
 
-        # Upload assets (--clobber replaces existing assets on re-runs)
         gh release upload $version "dist/Phantom_Recoil_Standalone.exe" --clobber
         gh release upload $version $setupFile --clobber
         gh release upload $version "SHA256SUMS.txt" --clobber
