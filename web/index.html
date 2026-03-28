@@ -13,7 +13,7 @@
 </head>
 
 <body>
-  <div class="app-container">
+  <div class="app-container" data-tab="attackers">
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -94,7 +94,10 @@
               <p id="selected-weapon">Select a weapon</p>
             </div>
           </div>
-          <canvas id="recoil-chart" class="recoil-chart"></canvas>
+          <div class="recoil-chart-wrap">
+            <canvas id="recoil-chart" class="recoil-chart"></canvas>
+            <div id="recoil-chart-placeholder" class="recoil-chart-placeholder">Select a weapon</div>
+          </div>
           <div class="recoil-stats-row">
             <div class="recoil-values">X: <span id="val-x">0</span> Y: <span id="val-y">0</span></div>
             <div class="recoil-values effective-values">Eff X: <span id="val-eff-x">0.00</span> Y: <span id="val-eff-y">0.00</span></div>

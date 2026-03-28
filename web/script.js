@@ -863,7 +863,7 @@ function _rcPoints(weapon, shots) {
 function drawRecoilPattern(canvas, weapon) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const Wc  = canvas.clientWidth  || 240;
-    const Hc  = canvas.clientHeight || 112;
+    const Hc  = canvas.clientHeight || 96;
     canvas.width  = Wc * dpr;
     canvas.height = Hc * dpr;
     const ctx = canvas.getContext('2d');
@@ -1016,8 +1016,9 @@ function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     if (valEffY) valEffY.textContent = (scaledY !== undefined ? scaledY.toFixed(2) : '—');
 
     const chart = document.getElementById('recoil-chart');
+    const placeholder = document.getElementById('recoil-chart-placeholder');
     if (chart) {
-        chart.classList.remove('empty');
+        if (placeholder) placeholder.style.display = 'none';
         requestAnimationFrame(() => drawRecoilPattern(chart, weapon));
     }
 }
@@ -1107,9 +1108,7 @@ function createWeaponButton(operator, weapon) {
     btn.dataset.weaponName = weapon.name;
 
     const left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.alignItems = 'center';
-    left.style.gap = '8px';
+    left.className = 'weapon-left';
 
     const weaponName = document.createElement('span');
     weaponName.className = 'weapon-name';
@@ -1122,6 +1121,7 @@ function createWeaponButton(operator, weapon) {
         weaponImg.setAttribute('aria-hidden', 'true');
         weaponImg.style.width = '28px';
         weaponImg.style.height = '14px';
+        weaponImg.style.flexShrink = '0';
         weaponImg.loading = 'lazy';
         weaponImg.style.objectFit = 'contain';
         weaponImg.style.filter = 'drop-shadow(0 1px 1px rgba(0,0,0,0.8))';
@@ -1423,6 +1423,8 @@ function initializeUI() {
             event.currentTarget.classList.add('active');
             event.currentTarget.setAttribute('aria-selected', 'true');
             currentTab = nextTab;
+            const appContainer = document.querySelector('.app-container');
+            if (appContainer) appContainer.dataset.tab = currentTab;
             sendClientEvent('info', 'tab switch', { tab: currentTab });
             requestRender();
         });
@@ -1587,9 +1589,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('input[type="number"], input[type="range"]').forEach((input) => {
         input.addEventListener('wheel', () => { input.blur(); }, { passive: true });
     });
-
-    const chart = document.getElementById('recoil-chart');
-    if (chart) chart.classList.add('empty');
 
     initializeUI();
     if (pywebviewReady) {

@@ -213,6 +213,10 @@ input:focus-visible {
   flex-grow: 1;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(214, 91, 55, 0.4) transparent;
 }
 
 .setting-item {
@@ -521,19 +525,22 @@ input[type='range']::-moz-range-thumb {
   margin-top: 2px;
 }
 
+.recoil-chart-wrap {
+  position: relative;
+  margin: 10px 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 245, 218, 0.11);
+  overflow: hidden;
+  background: #070705;
+}
+
 .recoil-chart {
   display: block;
   width: 100%;
-  height: 112px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 245, 218, 0.09);
-  background: rgba(7, 7, 5, 0.9);
-  margin: 10px 0 8px;
-  position: relative;
+  height: 96px;
 }
 
-.recoil-chart.empty::after {
-  content: 'SELECT A WEAPON';
+.recoil-chart-placeholder {
   position: absolute;
   inset: 0;
   display: flex;
@@ -542,7 +549,8 @@ input[type='range']::-moz-range-thumb {
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.12em;
-  color: rgba(255, 245, 218, 0.18);
+  text-transform: uppercase;
+  color: rgba(255, 245, 218, 0.2);
   pointer-events: none;
 }
 
@@ -754,6 +762,54 @@ input[type='range']::-moz-range-thumb {
   animation: activeTabPulse 1.4s linear infinite;
 }
 
+/* ── Tab colour theming ──────────────────────────────────────────────────── */
+
+/* Defenders → blue */
+.app-container[data-tab="defenders"] {
+  --accent:        #4e7f9f;
+  --accent-strong: #6da0c0;
+  --accent-soft:   rgba(78, 127, 159, 0.2);
+}
+.app-container[data-tab="defenders"] .sidebar::before {
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(78, 127, 159, 0.9) 0,
+    rgba(78, 127, 159, 0.9) 10px,
+    rgba(20, 18, 14, 0.96)  10px,
+    rgba(20, 18, 14, 0.96)  20px
+  );
+}
+.app-container[data-tab="defenders"] .tab-btn[data-tab="defenders"].active {
+  border-color: rgba(78, 127, 159, 0.78);
+  background: linear-gradient(180deg, rgba(78, 127, 159, 0.24), rgba(78, 127, 159, 0.14));
+}
+
+/* Favorites → amber */
+.app-container[data-tab="favorites"] {
+  --accent:        #c89e41;
+  --accent-strong: #ddb84e;
+  --accent-soft:   rgba(200, 158, 65, 0.2);
+}
+.app-container[data-tab="favorites"] .sidebar::before {
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(200, 158, 65, 0.9) 0,
+    rgba(200, 158, 65, 0.9) 10px,
+    rgba(20, 18, 14, 0.96)  10px,
+    rgba(20, 18, 14, 0.96)  20px
+  );
+}
+.app-container[data-tab="favorites"] .tab-btn[data-tab="favorites"].active {
+  border-color: rgba(200, 158, 65, 0.78);
+  background: linear-gradient(180deg, rgba(200, 158, 65, 0.24), rgba(200, 158, 65, 0.14));
+}
+
+/* Add CSS transition to sidebar stripe and topbar scan so colour change is smooth */
+.sidebar::before,
+.topbar::after {
+  transition: background 400ms ease;
+}
+
 .content-area {
   position: relative;
   z-index: 1;
@@ -953,6 +1009,22 @@ input[type='range']::-moz-range-thumb {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.weapon-btn .weapon-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.weapon-btn .weapon-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-state {
