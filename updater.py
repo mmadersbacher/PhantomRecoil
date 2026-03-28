@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 # Semantic version of the CURRENT build
-__version__ = "v1.0.33"
+__version__ = "v1.0.34"
 
 GITHUB_REPO = "mmadersbacher/PhantomRecoil"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

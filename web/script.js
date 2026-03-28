@@ -29,6 +29,7 @@ let userSensitivity = loadSensitivity();
 let weaponIntensityMap = loadWeaponIntensityMap();
 let selectedOperator = null;
 let selectedWeapon = null;
+let lastScaledRecoil = { x: 0, y: 0 };
 let hotkeyPollIntervalId = null;
 let pywebviewReady = false;
 let renderScheduled = false;
@@ -297,6 +298,118 @@ function updateHotkeyDisplay() {
     const name = getKeyNameFromVk(currentHotkeyVk);
     if (badge) badge.textContent = name;
     if (label) label.textContent = name;
+}
+
+function applyTabTheme(tabName) {
+    const theme = (tabName === 'defenders' || tabName === 'favorites') ? tabName : 'attackers';
+    document.body.dataset.tabTheme = theme;
+}
+
+function buildRecoilPoints(baseX, baseY, shotCount = 26) {
+    const points = [{ x: 0, y: 0 }];
+    let x = 0;
+    let y = 0;
+    for (let i = 1; i <= shotCount; i += 1) {
+        const verticalKick = Math.max(0.7, Math.abs(baseY) * 0.58);
+        const driftWave = Math.sin(i * 0.65) * (Math.abs(baseX) * 0.36 + 0.55);
+        const trend = baseX * 0.35;
+        x += trend + driftWave;
+        y += verticalKick * (1 - Math.min(i / 60, 0.35));
+        points.push({ x, y });
+    }
+    return points;
+}
+
+function renderRecoilGraph(weapon, scaledX, scaledY) {
+    const canvas = document.getElementById('recoil-graph');
+    const label = document.getElementById('graph-weapon-label');
+    if (!canvas) {
+        return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const cssWidth = Math.max(220, Math.round(rect.width || 260));
+    const cssHeight = 120;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+    canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const padding = 12;
+    const usableWidth = cssWidth - (padding * 2);
+    const usableHeight = cssHeight - (padding * 2);
+
+    ctx.strokeStyle = 'rgba(255, 245, 218, 0.14)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i += 1) {
+        const y = padding + ((usableHeight / 5) * i);
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(cssWidth - padding, y);
+        ctx.stroke();
+    }
+    for (let i = 0; i <= 6; i += 1) {
+        const x = padding + ((usableWidth / 6) * i);
+        ctx.beginPath();
+        ctx.moveTo(x, padding);
+        ctx.lineTo(x, cssHeight - padding);
+        ctx.stroke();
+    }
+
+    if (!weapon) {
+        if (label) label.textContent = 'No data';
+        ctx.fillStyle = 'rgba(197, 188, 164, 0.7)';
+        ctx.font = "11px 'IBM Plex Mono', monospace";
+        ctx.fillText('Select a weapon to preview recoil curve', padding + 4, Math.round(cssHeight / 2));
+        return;
+    }
+
+    const points = buildRecoilPoints(Number(scaledX) || 0, Number(scaledY) || 0);
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const spanX = Math.max(1, maxX - minX);
+    const spanY = Math.max(1, maxY - minY);
+
+    const mapped = points.map((point) => ({
+        x: padding + (((point.x - minX) / spanX) * usableWidth),
+        y: cssHeight - padding - (((point.y - minY) / spanY) * usableHeight),
+    }));
+
+    const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#d84e43';
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    mapped.forEach((point, index) => {
+        if (index === 0) {
+            ctx.moveTo(point.x, point.y);
+        } else {
+            ctx.lineTo(point.x, point.y);
+        }
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255, 242, 222, 0.9)';
+    mapped.forEach((point, index) => {
+        if (index % 4 === 0 || index === mapped.length - 1) {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+
+    if (label) {
+        label.textContent = `${weapon.name}  X:${Number(scaledX).toFixed(2)}  Y:${Number(scaledY).toFixed(2)}`;
+    }
 }
 
 function startHotkeyCapture() {
@@ -765,11 +878,8 @@ function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
 
         const img = document.createElement('img');
         img.alt = initials;
-        img.style.width = '100%';
-        img.style.height = '100%';
-        img.style.objectFit = 'cover';
-        img.style.borderRadius = '50%';
-        img.style.border = '2px solid var(--accent)';
+        img.className = 'operator-badge';
+        img.decoding = 'async';
         const fallback = () => {
             avatarEl.replaceChildren();
             avatarEl.style.background = 'var(--bg-card)';
@@ -786,6 +896,7 @@ function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
     valY.textContent = String(weapon.y);
     if (valEffX) valEffX.textContent = (scaledX !== undefined ? scaledX.toFixed(2) : '—');
     if (valEffY) valEffY.textContent = (scaledY !== undefined ? scaledY.toFixed(2) : '—');
+    renderRecoilGraph(weapon, scaledX, scaledY);
 }
 
 function selectWeapon(operator, weapon) {
@@ -812,6 +923,7 @@ function selectWeapon(operator, weapon) {
     const sensMultiplier = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
     const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
     const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
+    lastScaledRecoil = { x: scaledX, y: scaledY };
 
     updateSidebarSelection(operator, weapon, scaledX, scaledY);
 
@@ -879,11 +991,9 @@ function createWeaponButton(operator, weapon) {
         const weaponUrl = `https://trackercdn.com/cdn/r6.tracker.network/weapons/${slugify(weapon.name)}.png`;
         weaponImg.alt = '';
         weaponImg.setAttribute('aria-hidden', 'true');
-        weaponImg.style.width = '28px';
-        weaponImg.style.height = '14px';
+        weaponImg.className = 'weapon-icon';
         weaponImg.loading = 'lazy';
-        weaponImg.style.objectFit = 'contain';
-        weaponImg.style.filter = 'drop-shadow(0 1px 1px rgba(0,0,0,0.8))';
+        weaponImg.decoding = 'async';
         const fallback = () => {
             weaponImg.style.display = 'none';
         };
@@ -907,7 +1017,10 @@ function createOperatorCard(operator) {
     const isFav = favorites.includes(operator.name);
     const groupEl = document.createElement('div');
     groupEl.className = 'op-group';
-    groupEl.style.borderTop = `2px solid ${operator.role === 'Attacker' ? 'var(--attacker)' : 'var(--defender)'}`;
+    const cardAccent = currentTab === 'favorites'
+        ? 'var(--warning)'
+        : (operator.role === 'Attacker' ? 'var(--attacker)' : 'var(--defender)');
+    groupEl.style.borderTop = `2px solid ${cardAccent}`;
 
     const header = document.createElement('div');
     header.className = 'op-header';
@@ -935,13 +1048,9 @@ function createOperatorCard(operator) {
         const opImg = document.createElement('img');
         const opBadgeUrl = `https://trackercdn.com/cdn/r6.tracker.network/operators/badges/${slugify(operator.name)}.png`;
         opImg.alt = initials;
-        opImg.style.position = 'absolute';
-        opImg.style.width = '100%';
-        opImg.style.height = '100%';
+        opImg.className = 'operator-badge';
         opImg.loading = 'lazy';
-        opImg.style.objectFit = 'cover';
-        opImg.style.transform = 'scale(1.15)';
-        opImg.style.opacity = '0.9';
+        opImg.decoding = 'async';
         setImageSourceWithCache(opImg, opBadgeUrl, fallbackToInitials);
         avatar.appendChild(opImg);
     } else {
@@ -1140,7 +1249,9 @@ function requestRender() {
 
 function initializeUI() {
     sendClientEvent('info', 'ui initialized', { tab: currentTab });
+    applyTabTheme(currentTab);
     updateHotkeyDisplay();
+    renderRecoilGraph(null, 0, 0);
     requestRender();
 
     if (searchInput) {
@@ -1170,6 +1281,7 @@ function initializeUI() {
             event.currentTarget.classList.add('active');
             event.currentTarget.setAttribute('aria-selected', 'true');
             currentTab = nextTab;
+            applyTabTheme(currentTab);
             sendClientEvent('info', 'tab switch', { tab: currentTab });
             requestRender();
         });
@@ -1277,6 +1389,14 @@ window.addEventListener('beforeunload', () => {
     stopHotkeyPolling();
     stopPerformanceMonitor();
     pywebviewReady = false;
+});
+
+window.addEventListener('resize', () => {
+    if (selectedWeapon) {
+        renderRecoilGraph(selectedWeapon, lastScaledRecoil.x, lastScaledRecoil.y);
+    } else {
+        renderRecoilGraph(null, 0, 0);
+    }
 });
 
 document.addEventListener('DOMContentLoaded', () => {

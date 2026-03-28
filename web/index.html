@@ -64,6 +64,13 @@
               <p id="selected-weapon">Select a weapon</p>
               <div class="recoil-values">Base: X: <span id="val-x">0</span> | Y: <span id="val-y">0</span></div>
               <div class="recoil-values effective-values">Effective: X: <span id="val-eff-x">0.00</span> | Y: <span id="val-eff-y">0.00</span></div>
+              <div class="recoil-graph-panel">
+                <div class="recoil-graph-head">
+                  <span>Recoil Graph</span>
+                  <span id="graph-weapon-label" class="graph-weapon-label">No data</span>
+                </div>
+                <canvas id="recoil-graph" class="recoil-graph-canvas" width="260" height="120" aria-label="Recoil graph for selected weapon"></canvas>
+              </div>
             </div>
           </div>
         </div>

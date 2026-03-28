@@ -421,7 +421,19 @@ if __name__ == '__main__':
     elif icon_file:
         logger.info("[Startup] pywebview does not support 'icon' parameter. Continuing without custom icon.")
 
-    window = webview.create_window(APP_TITLE, **window_kwargs)
+    try:
+        window = webview.create_window(APP_TITLE, **window_kwargs)
+    except TypeError as err:
+        # Some pywebview/backend combinations advertise `icon` at one layer but
+        # reject it deeper in the call stack. Retry once without icon.
+        if 'icon' in window_kwargs and "unexpected keyword argument 'icon'" in str(err):
+            logger.warning(
+                "[Startup] create_window rejected 'icon' at runtime. Retrying without custom icon."
+            )
+            window_kwargs.pop('icon', None)
+            window = webview.create_window(APP_TITLE, **window_kwargs)
+        else:
+            raise
     api.set_window(window)
 
     # Ensure background loop is stopped when the UI is closed.
