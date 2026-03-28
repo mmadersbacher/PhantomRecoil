@@ -25,6 +25,9 @@ let currentTab = 'attackers';
 let searchQuery = '';
 let favorites = loadFavorites();
 let userDpi = loadDpi();
+let userSensitivity = loadSensitivity();
+let userHSens = loadHSens();
+let userVSens = loadVSens();
 let adsSens1x = loadAdsSens1x();
 let adsSens25x = loadAdsSens25x();
 let currentScope = loadScope();
@@ -60,6 +63,7 @@ const tabBtns = document.querySelectorAll('.tab-btn');
 const intensitySlider = document.getElementById('intensity');
 const intensityVal = document.getElementById('intensity-val');
 const dpiInput = document.getElementById('dpi-input');
+const sensitivityInput = document.getElementById('sensitivity-input');
 
 function loadFavorites() {
     try {
@@ -108,17 +112,70 @@ function saveDpi(value) {
 }
 
 
+function clampSensitivity(value) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return REFERENCE_SENSITIVITY;
+    return Math.max(1, Math.min(200, parsed));
+}
+
+function loadSensitivity() {
+    try {
+        return clampSensitivity(localStorage.getItem('r6_sensitivity') || String(REFERENCE_SENSITIVITY));
+    } catch (err) {
+        console.warn('[Storage] Invalid sensitivity found, using default.', err);
+        return REFERENCE_SENSITIVITY;
+    }
+}
+
+function saveSensitivity(value) {
+    userSensitivity = clampSensitivity(value);
+    localStorage.setItem('r6_sensitivity', String(userSensitivity));
+    if (sensitivityInput) sensitivityInput.value = String(userSensitivity);
+}
+
+function clampHVSens(value) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return 100;
+    return Math.max(1, Math.min(200, parsed));
+}
+
+function loadHSens() {
+    try {
+        return clampHVSens(localStorage.getItem('r6_h_sens') || '100');
+    } catch (err) {
+        return 100;
+    }
+}
+
+function saveHSens(value) {
+    userHSens = clampHVSens(value);
+    localStorage.setItem('r6_h_sens', String(userHSens));
+}
+
+function loadVSens() {
+    try {
+        return clampHVSens(localStorage.getItem('r6_v_sens') || '100');
+    } catch (err) {
+        return 100;
+    }
+}
+
+function saveVSens(value) {
+    userVSens = clampHVSens(value);
+    localStorage.setItem('r6_v_sens', String(userVSens));
+}
+
 function clampAdsSens(value) {
     const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return 25;
-    return Math.max(1, Math.min(200, parsed));
+    if (!Number.isFinite(parsed)) return 50;
+    return Math.max(1, Math.min(100, parsed));
 }
 
 function loadAdsSens1x() {
     try {
-        return clampAdsSens(localStorage.getItem('r6_ads_sens_1x') || '25');
+        return clampAdsSens(localStorage.getItem('r6_ads_sens_1x') || '50');
     } catch (err) {
-        return 25;
+        return 50;
     }
 }
 
@@ -129,9 +186,9 @@ function saveAdsSens1x(value) {
 
 function loadAdsSens25x() {
     try {
-        return clampAdsSens(localStorage.getItem('r6_ads_sens_25x') || '25');
+        return clampAdsSens(localStorage.getItem('r6_ads_sens_25x') || '50');
     } catch (err) {
-        return 25;
+        return 50;
     }
 }
 
@@ -401,6 +458,9 @@ function exportSettings() {
         version: 1,
         favorites,
         dpi: userDpi,
+        sensitivity: userSensitivity,
+        hSens: userHSens,
+        vSens: userVSens,
         adsSens1x,
         adsSens25x,
         scope: currentScope,
@@ -433,6 +493,9 @@ function importSettings(file) {
             }
 
             if (data.dpi !== undefined) saveDpi(data.dpi);
+            if (data.sensitivity !== undefined) saveSensitivity(data.sensitivity);
+            if (data.hSens !== undefined) saveHSens(data.hSens);
+            if (data.vSens !== undefined) saveVSens(data.vSens);
             if (data.adsSens1x !== undefined) saveAdsSens1x(data.adsSens1x);
             if (data.adsSens25x !== undefined) saveAdsSens25x(data.adsSens25x);
             if (data.scope !== undefined) {
@@ -836,19 +899,20 @@ function selectWeapon(operator, weapon) {
         sendMultiplierToBackend(nextIntensity);
     }
 
-    // DPI scaling: profiles are calibrated at 400 DPI.
-    // Effective ADS sensitivity: user enters Base × (ADS% / 100) directly.
-    // Reference is 50 (calibration point). Lower effective sens → more compensation needed.
-    // When no scope is active, no sensitivity correction is applied.
+    // DPI scaling: calibrated at 400 DPI.
+    // Base sensitivity: calibrated at 50 (R6S default hipfire).
+    // ADS scope %: R6S ADS sensitivity (1–100, 100% = same as hipfire).
+    // H/V multiplier: separate horizontal/vertical scaling (100 = no change).
+    // X and Y axes are scaled independently.
     const dpiMultiplier = 400 / clampDpi(userDpi);
-    const effectiveADS = currentScope === '1x'
-        ? clampAdsSens(adsSens1x)
+    const baseSensMult = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
+    const adsScaleFactor = currentScope === '1x'
+        ? (100 / clampAdsSens(adsSens1x))
         : currentScope === '2.5x'
-            ? clampAdsSens(adsSens25x)
-            : REFERENCE_SENSITIVITY;
-    const sensMultiplier = REFERENCE_SENSITIVITY / effectiveADS;
-    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
-    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
+            ? (100 / clampAdsSens(adsSens25x))
+            : 1.0;
+    const scaledX = Number(weapon.x) * dpiMultiplier * baseSensMult * adsScaleFactor * (100 / clampHVSens(userHSens));
+    const scaledY = Number(weapon.y) * dpiMultiplier * baseSensMult * adsScaleFactor * (100 / clampHVSens(userVSens));
 
     updateSidebarSelection(operator, weapon, scaledX, scaledY);
 
@@ -1229,6 +1293,34 @@ function initializeUI() {
             if (selectedOperator && selectedWeapon) {
                 selectWeapon(selectedOperator, selectedWeapon);
             }
+        });
+    }
+
+    if (sensitivityInput) {
+        sensitivityInput.value = String(userSensitivity);
+        sensitivityInput.addEventListener('change', (event) => {
+            saveSensitivity(event.target.value);
+            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
+        });
+    }
+
+    const hSensInputEl = document.getElementById('h-sens-input');
+    if (hSensInputEl) {
+        hSensInputEl.value = String(userHSens);
+        hSensInputEl.addEventListener('change', (event) => {
+            saveHSens(event.target.value);
+            hSensInputEl.value = String(userHSens);
+            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
+        });
+    }
+
+    const vSensInputEl = document.getElementById('v-sens-input');
+    if (vSensInputEl) {
+        vSensInputEl.value = String(userVSens);
+        vSensInputEl.addEventListener('change', (event) => {
+            saveVSens(event.target.value);
+            vSensInputEl.value = String(userVSens);
+            if (selectedOperator && selectedWeapon) selectWeapon(selectedOperator, selectedWeapon);
         });
     }
 

@@ -32,15 +32,31 @@
         </div>
 
         <div class="setting-item">
+          <label for="sensitivity-input">In-Game Sensitivity (Ref: 50)</label>
+          <input type="number" id="sensitivity-input" value="50" min="1" max="200" step="1">
+          <div class="scope-sens-row" style="margin-top:8px">
+            <div class="scope-sens-field">
+              <span class="scope-sens-label">H Multiplier</span>
+              <input type="number" id="h-sens-input" value="100" min="1" max="200" step="1">
+            </div>
+            <div class="scope-sens-field">
+              <span class="scope-sens-label">V Multiplier</span>
+              <input type="number" id="v-sens-input" value="100" min="1" max="200" step="1">
+            </div>
+          </div>
+          <p class="help-text">Base sens + optional H/V multiplier (100 = no change).</p>
+        </div>
+
+        <div class="setting-item">
           <label>ADS Scope Sensitivity</label>
           <div class="scope-sens-row">
             <div class="scope-sens-field">
-              <span class="scope-sens-label">1× Scope</span>
-              <input type="number" id="ads-sens-1x-input" value="25" min="1" max="200" step="1">
+              <span class="scope-sens-label">1× Scope %</span>
+              <input type="number" id="ads-sens-1x-input" value="50" min="1" max="100" step="1">
             </div>
             <div class="scope-sens-field">
-              <span class="scope-sens-label">2.5× Scope</span>
-              <input type="number" id="ads-sens-25x-input" value="25" min="1" max="200" step="1">
+              <span class="scope-sens-label">2.5× Scope %</span>
+              <input type="number" id="ads-sens-25x-input" value="50" min="1" max="100" step="1">
             </div>
           </div>
           <div class="scope-toggle" role="group" aria-label="Active scope mode">
@@ -48,7 +64,7 @@
             <button class="scope-btn" data-scope="1x" type="button">1×</button>
             <button class="scope-btn" data-scope="2.5x" type="button">2.5×</button>
           </div>
-          <p class="help-text">Effective ADS sens = Base × (ADS% / 100). e.g. 50 × 50% = 25.</p>
+          <p class="help-text">R6S ADS Sensitivity % (1–100). 100% = same as hipfire.</p>
         </div>
 
         <div class="setting-item">
