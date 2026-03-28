@@ -17,7 +17,7 @@ const KEY_TO_VK = {
     F9: 0x78, F10: 0x79, F11: 0x7A, F12: 0x7B,
 };
 
-// Reference sensitivity the recoil profiles are calibrated for (R6S default).
+// Effective ADS sensitivity at which the recoil profiles are calibrated (R6S: hipfire 50 × ADS 100% = 50).
 const REFERENCE_SENSITIVITY = 50;
 
 // State
@@ -25,7 +25,6 @@ let currentTab = 'attackers';
 let searchQuery = '';
 let favorites = loadFavorites();
 let userDpi = loadDpi();
-let userSensitivity = loadSensitivity();
 let adsSens1x = loadAdsSens1x();
 let adsSens25x = loadAdsSens25x();
 let currentScope = loadScope();
@@ -61,7 +60,6 @@ const tabBtns = document.querySelectorAll('.tab-btn');
 const intensitySlider = document.getElementById('intensity');
 const intensityVal = document.getElementById('intensity-val');
 const dpiInput = document.getElementById('dpi-input');
-const sensitivityInput = document.getElementById('sensitivity-input');
 
 function loadFavorites() {
     try {
@@ -109,42 +107,18 @@ function saveDpi(value) {
     }
 }
 
-function clampSensitivity(value) {
-    const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed)) {
-        return REFERENCE_SENSITIVITY;
-    }
-    return Math.max(1, Math.min(200, parsed));
-}
-
-function loadSensitivity() {
-    try {
-        return clampSensitivity(localStorage.getItem('r6_sensitivity') || String(REFERENCE_SENSITIVITY));
-    } catch (err) {
-        console.warn('[Storage] Invalid sensitivity found, using default.', err);
-        return REFERENCE_SENSITIVITY;
-    }
-}
-
-function saveSensitivity(value) {
-    userSensitivity = clampSensitivity(value);
-    localStorage.setItem('r6_sensitivity', String(userSensitivity));
-    if (sensitivityInput) {
-        sensitivityInput.value = String(userSensitivity);
-    }
-}
 
 function clampAdsSens(value) {
     const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return 50;
-    return Math.max(1, Math.min(100, parsed));
+    if (!Number.isFinite(parsed)) return 25;
+    return Math.max(1, Math.min(200, parsed));
 }
 
 function loadAdsSens1x() {
     try {
-        return clampAdsSens(localStorage.getItem('r6_ads_sens_1x') || '50');
+        return clampAdsSens(localStorage.getItem('r6_ads_sens_1x') || '25');
     } catch (err) {
-        return 50;
+        return 25;
     }
 }
 
@@ -155,9 +129,9 @@ function saveAdsSens1x(value) {
 
 function loadAdsSens25x() {
     try {
-        return clampAdsSens(localStorage.getItem('r6_ads_sens_25x') || '50');
+        return clampAdsSens(localStorage.getItem('r6_ads_sens_25x') || '25');
     } catch (err) {
-        return 50;
+        return 25;
     }
 }
 
@@ -427,7 +401,6 @@ function exportSettings() {
         version: 1,
         favorites,
         dpi: userDpi,
-        sensitivity: userSensitivity,
         adsSens1x,
         adsSens25x,
         scope: currentScope,
@@ -460,7 +433,6 @@ function importSettings(file) {
             }
 
             if (data.dpi !== undefined) saveDpi(data.dpi);
-            if (data.sensitivity !== undefined) saveSensitivity(data.sensitivity);
             if (data.adsSens1x !== undefined) saveAdsSens1x(data.adsSens1x);
             if (data.adsSens25x !== undefined) saveAdsSens25x(data.adsSens25x);
             if (data.scope !== undefined) {
@@ -865,19 +837,18 @@ function selectWeapon(operator, weapon) {
     }
 
     // DPI scaling: profiles are calibrated at 400 DPI.
-    // Sensitivity scaling: profiles are calibrated at sensitivity=50 (R6S default).
-    // Higher in-game sensitivity → crosshair moves more per pixel → less mouse compensation needed.
-    // ADS scope scaling: R6S ADS sensitivity is 1–100 where 100 = same speed as hipfire.
-    // Lower ADS sens → slower cursor → need more mouse movement to compensate same recoil.
+    // Effective ADS sensitivity: user enters Base × (ADS% / 100) directly.
+    // Reference is 50 (calibration point). Lower effective sens → more compensation needed.
+    // When no scope is active, no sensitivity correction is applied.
     const dpiMultiplier = 400 / clampDpi(userDpi);
-    const sensMultiplier = REFERENCE_SENSITIVITY / clampSensitivity(userSensitivity);
-    const adsScaleFactor = currentScope === '1x'
-        ? (100 / clampAdsSens(adsSens1x))
+    const effectiveADS = currentScope === '1x'
+        ? clampAdsSens(adsSens1x)
         : currentScope === '2.5x'
-            ? (100 / clampAdsSens(adsSens25x))
-            : 1.0;
-    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier * adsScaleFactor;
-    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier * adsScaleFactor;
+            ? clampAdsSens(adsSens25x)
+            : REFERENCE_SENSITIVITY;
+    const sensMultiplier = REFERENCE_SENSITIVITY / effectiveADS;
+    const scaledX = Number(weapon.x) * dpiMultiplier * sensMultiplier;
+    const scaledY = Number(weapon.y) * dpiMultiplier * sensMultiplier;
 
     updateSidebarSelection(operator, weapon, scaledX, scaledY);
 
@@ -1255,16 +1226,6 @@ function initializeUI() {
         dpiInput.value = String(userDpi);
         dpiInput.addEventListener('change', (event) => {
             saveDpi(event.target.value);
-            if (selectedOperator && selectedWeapon) {
-                selectWeapon(selectedOperator, selectedWeapon);
-            }
-        });
-    }
-
-    if (sensitivityInput) {
-        sensitivityInput.value = String(userSensitivity);
-        sensitivityInput.addEventListener('change', (event) => {
-            saveSensitivity(event.target.value);
             if (selectedOperator && selectedWeapon) {
                 selectWeapon(selectedOperator, selectedWeapon);
             }
