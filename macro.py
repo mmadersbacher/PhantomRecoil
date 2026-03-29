@@ -4,6 +4,7 @@ import win32con
 import random
 import threading
 import ctypes
+from ctypes import wintypes
 import math
 import logging
 
@@ -71,6 +72,48 @@ _INPUT_MOUSE = 0
 _MOUSEEVENTF_MOVE      = 0x0001
 _MOUSEEVENTF_LEFTDOWN  = 0x0002
 _MOUSEEVENTF_LEFTUP    = 0x0004
+
+_WH_MOUSE_LL = 14
+_WM_LBUTTONDOWN = 0x0201
+_WM_LBUTTONUP = 0x0202
+_WM_QUIT = 0x0012
+_LLMHF_INJECTED = 0x00000001
+
+
+class _POINT(ctypes.Structure):
+    _fields_ = [
+        ('x', wintypes.LONG),
+        ('y', wintypes.LONG),
+    ]
+
+
+class _MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ('pt', _POINT),
+        ('mouseData', wintypes.DWORD),
+        ('flags', wintypes.DWORD),
+        ('time', wintypes.DWORD),
+        ('dwExtraInfo', ctypes.c_void_p),
+    ]
+
+
+_LOW_LEVEL_MOUSE_PROC = ctypes.WINFUNCTYPE(
+    ctypes.c_ssize_t,
+    ctypes.c_int,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+)
+
+_user32 = ctypes.windll.user32
+_kernel32 = ctypes.windll.kernel32
+_user32.SetWindowsHookExW.argtypes = (ctypes.c_int, _LOW_LEVEL_MOUSE_PROC, ctypes.c_void_p, wintypes.DWORD)
+_user32.SetWindowsHookExW.restype = ctypes.c_void_p
+_user32.CallNextHookEx.argtypes = (ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+_user32.CallNextHookEx.restype = ctypes.c_ssize_t
+_user32.UnhookWindowsHookEx.argtypes = (ctypes.c_void_p,)
+_user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+_user32.PostThreadMessageW.argtypes = (wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+_user32.PostThreadMessageW.restype = wintypes.BOOL
 
 
 def _send_relative_mouse_move(dx: int, dy: int) -> None:
@@ -171,6 +214,17 @@ class RecoilMacro:
         # Used to guarantee a matching LEFTUP is always sent when leaving
         # the rapid fire state — prevents the "stuck button" auto-fire bug.
         self._rf_btn_down = False
+        self._rf_hold_neutralized = False
+        self._rf_next_shot_at = 0.0
+
+        # Track the real physical LMB state separately from injected clicks.
+        self._physical_lmb_pressed = False
+        self._mouse_hook = None
+        self._mouse_hook_proc = None
+        self._mouse_hook_thread = None
+        self._mouse_hook_thread_id = 0
+        self._mouse_hook_ready = threading.Event()
+        self._mouse_hook_available = False
 
         # Game detection state.
         self._game_running = True   # optimistic default so macro works if psutil absent
@@ -243,6 +297,8 @@ class RecoilMacro:
         with self._state_lock:
             self.rapid_fire = bool(enabled)
             self.fire_interval = safe_interval / 1000.0
+        if not enabled:
+            self._rf_reset_cycle()
         logger.info("[Macro] Rapid fire: enabled=%s interval=%.0fms", bool(enabled), safe_interval)
 
     def _rf_release(self) -> None:
@@ -254,6 +310,144 @@ class RecoilMacro:
         if self._rf_btn_down:
             _send_mouse_button(_MOUSEEVENTF_LEFTUP)
             self._rf_btn_down = False
+
+    def _rf_reset_cycle(self) -> None:
+        """Clear any rapid-fire click state and forget the current burst."""
+        self._rf_release()
+        self._rf_hold_neutralized = False
+        self._rf_next_shot_at = 0.0
+
+    def _handle_mouse_hook_event(self, message: int, flags: int) -> None:
+        """Update physical LMB state from the low-level mouse hook."""
+        if flags & _LLMHF_INJECTED:
+            return
+        if message == _WM_LBUTTONDOWN:
+            with self._state_lock:
+                self._physical_lmb_pressed = True
+        elif message == _WM_LBUTTONUP:
+            with self._state_lock:
+                self._physical_lmb_pressed = False
+
+    def _mouse_hook_callback(self, n_code, w_param, l_param):
+        """Low-level mouse hook that ignores our own injected clicks."""
+        if n_code >= 0 and l_param:
+            hook = ctypes.cast(l_param, ctypes.POINTER(_MSLLHOOKSTRUCT)).contents
+            self._handle_mouse_hook_event(int(w_param), int(hook.flags))
+        return _user32.CallNextHookEx(self._mouse_hook, n_code, w_param, l_param)
+
+    def _mouse_hook_loop(self) -> None:
+        """Run the low-level mouse hook on a dedicated message-pump thread."""
+        self._mouse_hook_ready.clear()
+        self._mouse_hook_thread_id = _kernel32.GetCurrentThreadId()
+        self._mouse_hook_proc = _LOW_LEVEL_MOUSE_PROC(self._mouse_hook_callback)
+        hook = _user32.SetWindowsHookExW(
+            _WH_MOUSE_LL,
+            self._mouse_hook_proc,
+            None,
+            0,
+        )
+        with self._state_lock:
+            self._mouse_hook = hook
+            self._mouse_hook_available = bool(hook)
+        if not hook:
+            self._mouse_hook_thread_id = 0
+            self._mouse_hook_proc = None
+            logger.warning("[Macro] Could not install low-level mouse hook; falling back to GetAsyncKeyState.")
+            self._mouse_hook_ready.set()
+            return
+
+        logger.info("[Macro] Low-level mouse hook installed for physical LMB tracking.")
+        self._mouse_hook_ready.set()
+        msg = wintypes.MSG()
+        try:
+            while True:
+                result = _user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if result == 0:
+                    break
+                if result == -1:
+                    logger.warning("[Macro] Mouse hook message loop returned GetMessageW=-1.")
+                    break
+                _user32.TranslateMessage(ctypes.byref(msg))
+                _user32.DispatchMessageW(ctypes.byref(msg))
+        finally:
+            try:
+                _user32.UnhookWindowsHookEx(hook)
+            except Exception:
+                logger.warning("[Macro] Failed to unhook low-level mouse hook.", exc_info=True)
+            with self._state_lock:
+                self._mouse_hook = None
+                self._mouse_hook_available = False
+                self._physical_lmb_pressed = False
+            self._mouse_hook_thread_id = 0
+            self._mouse_hook_proc = None
+            logger.info("[Macro] Low-level mouse hook stopped.")
+
+    def _ensure_mouse_hook(self) -> None:
+        """Start physical mouse tracking once before the macro loop begins."""
+        if self._mouse_hook_thread and self._mouse_hook_thread.is_alive():
+            return
+        self._physical_lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
+        self._mouse_hook_thread = threading.Thread(target=self._mouse_hook_loop, daemon=True, name='mouse-hook')
+        self._mouse_hook_thread.start()
+        self._mouse_hook_ready.wait(timeout=1.0)
+
+    def _stop_mouse_hook(self) -> None:
+        """Stop the physical mouse tracking thread if it is running."""
+        thread = self._mouse_hook_thread
+        thread_id = self._mouse_hook_thread_id
+        if thread_id:
+            _user32.PostThreadMessageW(thread_id, _WM_QUIT, 0, 0)
+        if thread and thread.is_alive():
+            thread.join(timeout=1.0)
+        self._mouse_hook_thread = None
+
+    def _is_lmb_pressed(self) -> bool:
+        """Read physical LMB state, falling back to GetAsyncKeyState if needed."""
+        with self._state_lock:
+            if self._mouse_hook_available:
+                return self._physical_lmb_pressed
+        return win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
+
+    def _rf_prime_burst(self, now: float) -> None:
+        """Neutralize the held physical button before timed synthetic clicks."""
+        if self._rf_hold_neutralized:
+            return
+        _send_mouse_button(_MOUSEEVENTF_LEFTUP)
+        self._rf_btn_down = False
+        self._rf_hold_neutralized = True
+        self._rf_next_shot_at = now + self.fire_interval
+
+    def _rf_fire_shot(self, recoil_x: float, recoil_y: float, multiplier: float, now: float) -> None:
+        """Fire one complete synthetic rapid-fire click and finish in LEFTUP."""
+        if now < self._rf_next_shot_at:
+            return
+
+        dx_target = (recoil_x - 1) * multiplier
+        dy_target = recoil_y * multiplier
+        self.accumulated_x += dx_target
+        self.accumulated_y += dy_target
+        move_x = int(self.accumulated_x)
+        move_y = int(self.accumulated_y)
+
+        try:
+            _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
+            self._rf_btn_down = True
+            if not self._sleep_interruptible(random.uniform(0.010, 0.015), step=0.004):
+                self._rf_release()
+                return
+
+            _send_button_with_move(_MOUSEEVENTF_LEFTUP, move_x, move_y)
+            self._rf_btn_down = False
+            if move_x or move_y:
+                self.accumulated_x -= move_x
+                self.accumulated_y -= move_y
+        except Exception:
+            self._rf_release()
+            raise
+
+        self.accumulated_x = 0.0
+        self.accumulated_y = 0.0
+        self._rf_next_shot_at = max(self._rf_next_shot_at + self.fire_interval, time.monotonic() + 0.001)
 
     def _sleep_interruptible(self, duration: float, step: float = 0.010) -> bool:
         """Sleep for *duration* seconds in small steps.
@@ -274,6 +468,7 @@ class RecoilMacro:
         """Stops the macro loop gracefully."""
         with self._state_lock:
             self.running = False
+        self._stop_mouse_hook()
 
     def get_state_snapshot(self):
         """Return a thread-safe state snapshot for diagnostics."""
@@ -333,6 +528,7 @@ class RecoilMacro:
         except Exception:
             logger.warning("[Macro] Could not set GIL switch interval.")
 
+        self._ensure_mouse_hook()
         with self._state_lock:
             self.running = True
 
@@ -354,6 +550,9 @@ class RecoilMacro:
                     if not self._game_running:
                         with self._state_lock:
                             self.is_active = False
+                        self._rf_reset_cycle()
+                        self.accumulated_x = 0.0
+                        self.accumulated_y = 0.0
                         time.sleep(0.5)
                         continue
 
@@ -372,45 +571,19 @@ class RecoilMacro:
 
                         if rmb_pressed:
                             # Check if Left Mouse Button is pressed (Shooting).
-                            lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
+                            lmb_pressed = self._is_lmb_pressed()
 
                             if lmb_pressed:
                                 if rapid_fire:
                                     # ── Ultra-fast rapid fire for semi-auto weapons ───────────
                                     # Apply recoil compensation for this shot.
-                                    dx_target = (recoil_x - 1) * multiplier
-                                    dy_target = recoil_y * multiplier
-                                    self.accumulated_x += dx_target
-                                    self.accumulated_y += dy_target
-                                    move_x = int(self.accumulated_x)
-                                    move_y = int(self.accumulated_y)
-
-                                    # Bundle recoil move + LEFTUP in one SendInput batch.
-                                    # Hardware mice deliver motion delta and button state in
-                                    # the same HID report; replicating that compound structure
-                                    # makes the event pattern harder to distinguish from a
-                                    # real device.
-                                    _send_button_with_move(_MOUSEEVENTF_LEFTUP, move_x, move_y)
-                                    self._rf_btn_down = False
-                                    if move_x or move_y:
-                                        self.accumulated_x -= move_x
-                                        self.accumulated_y -= move_y
-
-                                    # Jittered release gap; ~8 % of cycles get a tiny extra
-                                    # micro-pause to mimic natural human timing variation.
-                                    time.sleep(random.uniform(0.011, 0.017))
-                                    if random.random() < 0.08:
-                                        time.sleep(random.uniform(0.001, 0.003))
-
-                                    _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
-                                    self._rf_btn_down = True
-                                    # Reset after each shot: the weapon partially settles
-                                    # between rapid fire rounds, so each shot is independent.
-                                    self.accumulated_x = 0.0
-                                    self.accumulated_y = 0.0
-                                    time.sleep(random.uniform(0.010, 0.015))
+                                    now = time.monotonic()
+                                    self._rf_prime_burst(now)
+                                    self._rf_fire_shot(recoil_x, recoil_y, multiplier, now)
+                                    time.sleep(0.001)
 
                                 else:
+                                    self._rf_reset_cycle()
                                     # ── Normal recoil compensation ────────────────────────────
                                     # Original Lua logic: MoveMouseRelative(recoilX - 1, recoilY)
                                     # We apply the multiplier to lessen aggressive pulling.
@@ -437,7 +610,7 @@ class RecoilMacro:
 
                         # Leaving firing state: release any synthetic LEFTDOWN first,
                         # then reset accumulators.
-                        self._rf_release()
+                        self._rf_reset_cycle()
                         self.accumulated_x = 0.0
                         self.accumulated_y = 0.0
 
@@ -446,7 +619,7 @@ class RecoilMacro:
                         continue
 
                     # Hotkey is off: release any outstanding synthetic button before idling.
-                    self._rf_release()
+                    self._rf_reset_cycle()
                     time.sleep(0.006)
                     continue
                 except Exception as e:
@@ -456,7 +629,8 @@ class RecoilMacro:
                 time.sleep(0.001)
         finally:
             # Ensure no synthetic LEFTDOWN is left hanging when the macro exits.
-            self._rf_release()
+            self._rf_reset_cycle()
+            self._stop_mouse_hook()
             if self.timer_resolution_set:
                 try:
                     ctypes.windll.winmm.timeEndPeriod(1)

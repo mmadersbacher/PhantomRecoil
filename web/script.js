@@ -943,21 +943,23 @@ function updateSidebarSelection(operator, weapon, scaledX, scaledY) {
 
     const initials = operator.name.substring(0, 2).toUpperCase();
     avatarEl.replaceChildren();
-    avatarEl.style.background = 'var(--bg-card)';
+    avatarEl.classList.remove('has-badge');
     avatarEl.textContent = initials;
 
     if (ENABLE_REMOTE_ASSETS) {
         const badgeUrl = `https://trackercdn.com/cdn/r6.tracker.network/operators/badges/${slugify(operator.name)}.png`;
-        avatarEl.style.background = 'transparent';
         avatarEl.replaceChildren();
 
         const img = document.createElement('img');
         img.alt = initials;
         img.className = 'operator-badge';
         img.decoding = 'async';
+        img.addEventListener('load', () => {
+            avatarEl.classList.add('has-badge');
+        }, { once: true });
         const fallback = () => {
+            avatarEl.classList.remove('has-badge');
             avatarEl.replaceChildren();
-            avatarEl.style.background = 'var(--bg-card)';
             avatarEl.textContent = initials;
         };
 
@@ -1069,9 +1071,7 @@ function createWeaponButton(operator, weapon) {
     btn.dataset.weaponName = weapon.name;
 
     const left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.alignItems = 'center';
-    left.style.gap = '8px';
+    left.className = 'weapon-main';
 
     const weaponName = document.createElement('span');
     weaponName.className = 'weapon-name';
@@ -1111,7 +1111,7 @@ function createOperatorCard(operator) {
     const cardAccent = currentTab === 'favorites'
         ? 'var(--warning)'
         : (operator.role === 'Attacker' ? 'var(--attacker)' : 'var(--defender)');
-    groupEl.style.borderTop = `2px solid ${cardAccent}`;
+    groupEl.style.setProperty('--card-accent', cardAccent);
 
     const header = document.createElement('div');
     header.className = 'op-header';
@@ -1121,16 +1121,13 @@ function createOperatorCard(operator) {
 
     const avatar = document.createElement('div');
     avatar.className = 'small-avatar';
-    avatar.style.overflow = 'hidden';
-    avatar.style.position = 'relative';
-    avatar.style.background = 'var(--bg-dark)';
 
     const initials = operator.name.substring(0, 2).toUpperCase();
     const fallbackToInitials = () => {
+        avatar.classList.remove('has-badge');
         avatar.replaceChildren();
         const fallback = document.createElement('span');
-        fallback.style.color = 'var(--text-muted)';
-        fallback.style.fontWeight = '600';
+        fallback.className = 'operator-fallback';
         fallback.textContent = initials;
         avatar.appendChild(fallback);
     };
@@ -1142,6 +1139,9 @@ function createOperatorCard(operator) {
         opImg.className = 'operator-badge';
         opImg.loading = 'lazy';
         opImg.decoding = 'async';
+        opImg.addEventListener('load', () => {
+            avatar.classList.add('has-badge');
+        }, { once: true });
         setImageSourceWithCache(opImg, opBadgeUrl, fallbackToInitials);
         avatar.appendChild(opImg);
     } else {
@@ -1149,9 +1149,7 @@ function createOperatorCard(operator) {
     }
 
     const nameEl = document.createElement('h3');
-    nameEl.style.fontSize = '14px';
-    nameEl.style.fontWeight = '600';
-    nameEl.style.color = 'var(--text-main)';
+    nameEl.className = 'operator-name';
     nameEl.textContent = operator.name;
 
     opInfo.appendChild(avatar);
