@@ -144,6 +144,11 @@ class RecoilMacro:
         self.rapid_fire = False
         self.fire_interval = 0.30  # seconds between shots (≈ 200 RPM default)
 
+        # Tracks whether the last synthetic event we sent was LEFTDOWN.
+        # Used to guarantee a matching LEFTUP is always sent when leaving
+        # the rapid fire state — prevents the "stuck button" auto-fire bug.
+        self._rf_btn_down = False
+
         # Game detection state.
         self._game_running = True   # optimistic default so macro works if psutil absent
         self._last_game_check = 0.0
@@ -216,6 +221,16 @@ class RecoilMacro:
             self.rapid_fire = bool(enabled)
             self.fire_interval = safe_interval / 1000.0
         logger.info("[Macro] Rapid fire: enabled=%s interval=%.0fms", bool(enabled), safe_interval)
+
+    def _rf_release(self) -> None:
+        """Send LEFTUP if a synthetic LEFTDOWN is outstanding from rapid fire.
+
+        Must be called whenever the macro leaves the active-firing state so the
+        game never sees an unpaired LEFTDOWN (which would cause permanent auto-fire).
+        """
+        if self._rf_btn_down:
+            _send_mouse_button(_MOUSEEVENTF_LEFTUP)
+            self._rf_btn_down = False
 
     def _sleep_interruptible(self, duration: float, step: float = 0.010) -> bool:
         """Sleep for *duration* seconds in small steps.
@@ -351,15 +366,17 @@ class RecoilMacro:
                                         self.accumulated_x -= move_x
                                         self.accumulated_y -= move_y
 
-                                    # Inject release + immediate re-press.
-                                    # 12 ms gaps let the game engine register a distinct
-                                    # LEFTUP / LEFTDOWN event per shot. Physical release of
-                                    # LMB or RMB is detected by the outer loop re-checking
-                                    # rmb_pressed / lmb_pressed at the top of each iteration.
+                                    # Jittered release + re-press.
+                                    # Randomised gaps prevent fixed-interval fingerprinting
+                                    # while keeping shot rate near the weapon's fire-rate cap.
+                                    # _rf_btn_down is updated around each injection so any
+                                    # exit path (RMB up, LMB up, hotkey off) can clean up.
                                     _send_mouse_button(_MOUSEEVENTF_LEFTUP)
-                                    time.sleep(0.012)
+                                    self._rf_btn_down = False
+                                    time.sleep(random.uniform(0.011, 0.017))
                                     _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
-                                    time.sleep(0.012)
+                                    self._rf_btn_down = True
+                                    time.sleep(random.uniform(0.010, 0.015))
 
                                 else:
                                     # ── Normal recoil compensation ────────────────────────────
@@ -386,7 +403,9 @@ class RecoilMacro:
 
                                 continue
 
-                        # Reset accumulators if not actively firing.
+                        # Leaving firing state: release any synthetic LEFTDOWN first,
+                        # then reset accumulators.
+                        self._rf_release()
                         self.accumulated_x = 0.0
                         self.accumulated_y = 0.0
 
@@ -394,7 +413,8 @@ class RecoilMacro:
                         time.sleep(0.002)
                         continue
 
-                    # Hotkey is off: use a slower poll to reduce background CPU pressure.
+                    # Hotkey is off: release any outstanding synthetic button before idling.
+                    self._rf_release()
                     time.sleep(0.006)
                     continue
                 except Exception as e:
@@ -403,6 +423,8 @@ class RecoilMacro:
                 # Sleep 1ms to prevent 100% CPU utilization after an exception.
                 time.sleep(0.001)
         finally:
+            # Ensure no synthetic LEFTDOWN is left hanging when the macro exits.
+            self._rf_release()
             if self.timer_resolution_set:
                 try:
                     ctypes.windll.winmm.timeEndPeriod(1)
