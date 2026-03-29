@@ -208,14 +208,19 @@ class RecoilMacro:
         # When enabled the loop injects timed click sequences instead of
         # continuously compensating while LMB is physically held.
         self.rapid_fire = False
-        self.fire_interval = 0.30  # seconds between shots (≈ 200 RPM default)
+        self.fire_interval = 0.30  # unused for timing, kept for API compat
 
         # Tracks whether the last synthetic event we sent was LEFTDOWN.
         # Used to guarantee a matching LEFTUP is always sent when leaving
         # the rapid fire state — prevents the "stuck button" auto-fire bug.
         self._rf_btn_down = False
         self._rf_hold_neutralized = False
-        self._rf_next_shot_at = 0.0
+
+        # Human-behavior simulation counters for anti-cheat evasion.
+        # _rf_shot_count: shots fired in current burst.
+        # _rf_next_fatigue: shot count at which next fatigue pause triggers.
+        self._rf_shot_count = 0
+        self._rf_next_fatigue = random.randint(7, 14)
 
         # Track the real physical LMB state separately from injected clicks.
         self._physical_lmb_pressed = False
@@ -315,6 +320,8 @@ class RecoilMacro:
         """Clear any rapid-fire click state and forget the current burst."""
         self._rf_release()
         self._rf_hold_neutralized = False
+        self._rf_shot_count = 0
+        self._rf_next_fatigue = random.randint(7, 14)
 
     def _handle_mouse_hook_event(self, message: int, flags: int) -> None:
         """Update physical LMB state from the low-level mouse hook."""
@@ -416,7 +423,12 @@ class RecoilMacro:
         self._rf_hold_neutralized = True
 
     def _rf_fire_shot(self, recoil_x: float, recoil_y: float, multiplier: float) -> None:
-        """Fire one complete synthetic rapid-fire click with recoil compensation."""
+        """Fire one rapid-fire click with full human-behavior simulation.
+
+        Timing model targets 6–13 shots/sec — the upper range of real human
+        rapid-clicking — using triangular distributions, micro-tremor, fatigue
+        simulation and rare fumbles to defeat statistical pattern analysis.
+        """
         dx_target = (recoil_x - 1) * multiplier
         dy_target = recoil_y * multiplier
         self.accumulated_x += dx_target
@@ -424,11 +436,24 @@ class RecoilMacro:
         move_x = int(self.accumulated_x)
         move_y = int(self.accumulated_y)
 
-        try:
-            _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
-            self._rf_btn_down = True
-            time.sleep(random.uniform(0.010, 0.015))
+        # Micro-tremor: hands always have slight movement when clicking.
+        # Applied ~25 % of shots; amplitude capped at ±1 px so it's subtle.
+        if random.random() < 0.25:
+            tremor_x = random.choice((-1, 0, 1))
+            tremor_y = random.choice((-1, 0, 0, 1))
+        else:
+            tremor_x = tremor_y = 0
 
+        try:
+            # Bundle DOWN + optional tremor in one SendInput batch.
+            _send_button_with_move(_MOUSEEVENTF_LEFTDOWN, tremor_x, tremor_y)
+            self._rf_btn_down = True
+
+            # Click-hold duration: triangular distribution (mode 42 ms).
+            # Real human button-press measurements: 30–80 ms, peak ~45 ms.
+            time.sleep(random.triangular(0.028, 0.075, 0.042))
+
+            # Bundle UP + recoil compensation in one SendInput batch.
             _send_button_with_move(_MOUSEEVENTF_LEFTUP, move_x, move_y)
             self._rf_btn_down = False
             if move_x or move_y:
@@ -442,10 +467,23 @@ class RecoilMacro:
         self.accumulated_x = 0.0
         self.accumulated_y = 0.0
 
-        # Jittered gap between shots (anti-cheat timing variation).
-        time.sleep(random.uniform(0.011, 0.017))
-        if random.random() < 0.08:
-            time.sleep(random.uniform(0.001, 0.003))
+        # Inter-shot gap: triangular distribution (mode 62 ms).
+        # Gives ~6–13 shots/sec which matches fast but plausible human clicking.
+        gap = random.triangular(0.045, 0.095, 0.062)
+
+        # Fatigue simulation: after every N shots the finger needs a tiny rest.
+        # N is randomised (7–14) so the period itself is unpredictable.
+        self._rf_shot_count += 1
+        if self._rf_shot_count >= self._rf_next_fatigue:
+            gap += random.triangular(0.012, 0.048, 0.024)
+            self._rf_shot_count = 0
+            self._rf_next_fatigue = random.randint(7, 14)
+
+        # Rare fumble (~1.5 %): a noticeable hesitation like a real misclick.
+        if random.random() < 0.015:
+            gap += random.uniform(0.065, 0.190)
+
+        time.sleep(gap)
 
     def _sleep_interruptible(self, duration: float, step: float = 0.010) -> bool:
         """Sleep for *duration* seconds in small steps.
