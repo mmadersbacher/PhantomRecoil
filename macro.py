@@ -327,7 +327,6 @@ class RecoilMacro:
                         recoil_y = self.recoil_y
                         multiplier = self.multiplier
                         rapid_fire = self.rapid_fire
-                        fire_interval = self.fire_interval
 
                     if hotkey_active:
                         # Check if Right Mouse Button is pressed (Aiming).
@@ -339,11 +338,7 @@ class RecoilMacro:
 
                             if lmb_pressed:
                                 if rapid_fire:
-                                    # ── Rapid fire for semi-auto weapons (DMRs) ──────────────
-                                    # The user holds LMB; we inject a timed release+press
-                                    # sequence so the game registers individual shots at the
-                                    # configured fire rate, with recoil compensation per shot.
-
+                                    # ── Ultra-fast rapid fire for semi-auto weapons ───────────
                                     # Apply recoil compensation for this shot.
                                     dx_target = (recoil_x - 1) * multiplier
                                     dy_target = recoil_y * multiplier
@@ -356,27 +351,15 @@ class RecoilMacro:
                                         self.accumulated_x -= move_x
                                         self.accumulated_y -= move_y
 
-                                    # Wait the inter-shot interval (reserve 40 ms for
-                                    # the click simulation at the end).
-                                    _RF_CLICK_GAP = 0.040
-                                    if not self._sleep_interruptible(
-                                        max(0.010, fire_interval - _RF_CLICK_GAP)
-                                    ):
-                                        break
-
-                                    # After the interval the HID driver has had plenty of
-                                    # time to restore the async key state if the user is
-                                    # still physically holding LMB.
-                                    if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0:
-                                        # Re-click: brief release then press to fire next shot.
-                                        _send_mouse_button(_MOUSEEVENTF_LEFTUP)
-                                        time.sleep(0.014)
-                                        _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
-                                        time.sleep(0.026)
-                                    else:
-                                        # User released LMB — stop rapid fire cycle.
-                                        self.accumulated_x = 0.0
-                                        self.accumulated_y = 0.0
+                                    # Inject release + immediate re-press.
+                                    # 12 ms gaps let the game engine register a distinct
+                                    # LEFTUP / LEFTDOWN event per shot. Physical release of
+                                    # LMB or RMB is detected by the outer loop re-checking
+                                    # rmb_pressed / lmb_pressed at the top of each iteration.
+                                    _send_mouse_button(_MOUSEEVENTF_LEFTUP)
+                                    time.sleep(0.012)
+                                    _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
+                                    time.sleep(0.012)
 
                                 else:
                                     # ── Normal recoil compensation ────────────────────────────
