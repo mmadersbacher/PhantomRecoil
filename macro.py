@@ -404,6 +404,10 @@ class RecoilMacro:
 
                                     _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
                                     self._rf_btn_down = True
+                                    # Reset after each shot: the weapon partially settles
+                                    # between rapid fire rounds, so each shot is independent.
+                                    self.accumulated_x = 0.0
+                                    self.accumulated_y = 0.0
                                     time.sleep(random.uniform(0.010, 0.015))
 
                                 else:

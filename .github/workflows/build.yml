@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     env:
-      APP_VERSION: 1.0.38
+      APP_VERSION: 1.0.39
 
     steps:
     - uses: actions/checkout@v4
@@ -89,5 +89,5 @@ jobs:
       run: |
         $version = "v${{ env.APP_VERSION }}"
         $setupFile = "dist/PhantomRecoilSetup_v${{ env.APP_VERSION }}.exe"
-        $notes = "fix(macro): compound SendInput batching + micro-hesitation for anti-cheat``n``n- Bundle recoil move + LEFTUP in one SendInput(2,...) call to mimic real HID``n  compound reports (hardware mice deliver delta + button in same USB frame)``n- Add 8% probability micro-hesitation (1-3ms) between shots to simulate``n  natural human timing variation and break statistical pattern analysis``n``nAssets:``n- PhantomRecoilSetup_v${{ env.APP_VERSION }}.exe``n- Phantom_Recoil_Standalone.exe``n- SHA256SUMS.txt``n- latest.json"
+        $notes = "fix(macro): reset recoil accumulator between rapid fire shots``n``nThe weapon partially settles between individual rapid fire rounds, so each``nshot should be compensated independently. Resetting accumulated_x/y after``neach LEFTDOWN prevents aim drift caused by additive accumulation over a burst.``n``nAssets:``n- PhantomRecoilSetup_v${{ env.APP_VERSION }}.exe``n- Phantom_Recoil_Standalone.exe``n- SHA256SUMS.txt``n- latest.json"
         gh release create $version "dist/Phantom_Recoil_Standalone.exe" $setupFile "SHA256SUMS.txt" "latest.json" --title $version --notes $notes
