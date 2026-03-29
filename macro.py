@@ -315,7 +315,6 @@ class RecoilMacro:
         """Clear any rapid-fire click state and forget the current burst."""
         self._rf_release()
         self._rf_hold_neutralized = False
-        self._rf_next_shot_at = 0.0
 
     def _handle_mouse_hook_event(self, message: int, flags: int) -> None:
         """Update physical LMB state from the low-level mouse hook."""
@@ -408,20 +407,16 @@ class RecoilMacro:
                 return self._physical_lmb_pressed
         return win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
 
-    def _rf_prime_burst(self, now: float) -> None:
-        """Neutralize the held physical button before timed synthetic clicks."""
+    def _rf_prime_burst(self) -> None:
+        """Neutralize the held physical button before injecting synthetic clicks."""
         if self._rf_hold_neutralized:
             return
         _send_mouse_button(_MOUSEEVENTF_LEFTUP)
         self._rf_btn_down = False
         self._rf_hold_neutralized = True
-        self._rf_next_shot_at = now + self.fire_interval
 
-    def _rf_fire_shot(self, recoil_x: float, recoil_y: float, multiplier: float, now: float) -> None:
-        """Fire one complete synthetic rapid-fire click and finish in LEFTUP."""
-        if now < self._rf_next_shot_at:
-            return
-
+    def _rf_fire_shot(self, recoil_x: float, recoil_y: float, multiplier: float) -> None:
+        """Fire one complete synthetic rapid-fire click with recoil compensation."""
         dx_target = (recoil_x - 1) * multiplier
         dy_target = recoil_y * multiplier
         self.accumulated_x += dx_target
@@ -432,9 +427,7 @@ class RecoilMacro:
         try:
             _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
             self._rf_btn_down = True
-            if not self._sleep_interruptible(random.uniform(0.010, 0.015), step=0.004):
-                self._rf_release()
-                return
+            time.sleep(random.uniform(0.010, 0.015))
 
             _send_button_with_move(_MOUSEEVENTF_LEFTUP, move_x, move_y)
             self._rf_btn_down = False
@@ -445,9 +438,14 @@ class RecoilMacro:
             self._rf_release()
             raise
 
+        # Reset accumulator — each semi-auto shot is independent.
         self.accumulated_x = 0.0
         self.accumulated_y = 0.0
-        self._rf_next_shot_at = max(self._rf_next_shot_at + self.fire_interval, time.monotonic() + 0.001)
+
+        # Jittered gap between shots (anti-cheat timing variation).
+        time.sleep(random.uniform(0.011, 0.017))
+        if random.random() < 0.08:
+            time.sleep(random.uniform(0.001, 0.003))
 
     def _sleep_interruptible(self, duration: float, step: float = 0.010) -> bool:
         """Sleep for *duration* seconds in small steps.
@@ -576,11 +574,8 @@ class RecoilMacro:
                             if lmb_pressed:
                                 if rapid_fire:
                                     # ── Ultra-fast rapid fire for semi-auto weapons ───────────
-                                    # Apply recoil compensation for this shot.
-                                    now = time.monotonic()
-                                    self._rf_prime_burst(now)
-                                    self._rf_fire_shot(recoil_x, recoil_y, multiplier, now)
-                                    time.sleep(0.001)
+                                    self._rf_prime_burst()
+                                    self._rf_fire_shot(recoil_x, recoil_y, multiplier)
 
                                 else:
                                     self._rf_reset_cycle()
