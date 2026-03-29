@@ -101,6 +101,29 @@ def _send_mouse_button(flags: int) -> None:
     ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 
 
+def _send_button_with_move(flags: int, dx: int, dy: int) -> None:
+    """Batch a button event + optional relative move in one SendInput call.
+
+    Real gaming mice deliver movement delta and button state changes in the
+    same USB HID report, so they appear as a compound input event rather
+    than two consecutive single-event calls.  Replicating this structure
+    makes the injection pattern harder to distinguish from hardware.
+    """
+    if dx or dy:
+        inputs = (_INPUT * 2)()
+        inputs[0].type = _INPUT_MOUSE
+        inputs[0]._input.mi = _MOUSEINPUT(
+            dx=dx, dy=dy, mouseData=0, dwFlags=_MOUSEEVENTF_MOVE, time=0, dwExtraInfo=None,
+        )
+        inputs[1].type = _INPUT_MOUSE
+        inputs[1]._input.mi = _MOUSEINPUT(
+            dx=0, dy=0, mouseData=0, dwFlags=flags, time=0, dwExtraInfo=None,
+        )
+        ctypes.windll.user32.SendInput(2, inputs, ctypes.sizeof(_INPUT))
+    else:
+        _send_mouse_button(flags)
+
+
 # ── Windows system info helpers ───────────────────────────────────────────────
 
 def get_pointer_speed() -> int:
@@ -361,19 +384,24 @@ class RecoilMacro:
                                     self.accumulated_y += dy_target
                                     move_x = int(self.accumulated_x)
                                     move_y = int(self.accumulated_y)
-                                    if move_x != 0 or move_y != 0:
-                                        _send_relative_mouse_move(move_x, move_y)
+
+                                    # Bundle recoil move + LEFTUP in one SendInput batch.
+                                    # Hardware mice deliver motion delta and button state in
+                                    # the same HID report; replicating that compound structure
+                                    # makes the event pattern harder to distinguish from a
+                                    # real device.
+                                    _send_button_with_move(_MOUSEEVENTF_LEFTUP, move_x, move_y)
+                                    self._rf_btn_down = False
+                                    if move_x or move_y:
                                         self.accumulated_x -= move_x
                                         self.accumulated_y -= move_y
 
-                                    # Jittered release + re-press.
-                                    # Randomised gaps prevent fixed-interval fingerprinting
-                                    # while keeping shot rate near the weapon's fire-rate cap.
-                                    # _rf_btn_down is updated around each injection so any
-                                    # exit path (RMB up, LMB up, hotkey off) can clean up.
-                                    _send_mouse_button(_MOUSEEVENTF_LEFTUP)
-                                    self._rf_btn_down = False
+                                    # Jittered release gap; ~8 % of cycles get a tiny extra
+                                    # micro-pause to mimic natural human timing variation.
                                     time.sleep(random.uniform(0.011, 0.017))
+                                    if random.random() < 0.08:
+                                        time.sleep(random.uniform(0.001, 0.003))
+
                                     _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
                                     self._rf_btn_down = True
                                     time.sleep(random.uniform(0.010, 0.015))

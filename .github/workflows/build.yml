@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     env:
-      APP_VERSION: 1.0.37
+      APP_VERSION: 1.0.38
 
     steps:
     - uses: actions/checkout@v4
@@ -89,5 +89,5 @@ jobs:
       run: |
         $version = "v${{ env.APP_VERSION }}"
         $setupFile = "dist/PhantomRecoilSetup_v${{ env.APP_VERSION }}.exe"
-        $notes = "fix(macro): fix rapid fire stuck-button bug + anti-cheat jitter``n``n- Fix: send synthetic LEFTUP on all exit paths (LMB up, RMB up, hotkey off, stop)``n  so the game never sees an unpaired LEFTDOWN causing permanent auto-fire``n- Anti-cheat: randomise UP/DOWN gap timing (11-17ms / 10-15ms) to prevent``n  fixed-interval fingerprinting while keeping shot rate at weapon fire-rate cap``n``nAssets:``n- PhantomRecoilSetup_v${{ env.APP_VERSION }}.exe``n- Phantom_Recoil_Standalone.exe``n- SHA256SUMS.txt``n- latest.json"
+        $notes = "fix(macro): compound SendInput batching + micro-hesitation for anti-cheat``n``n- Bundle recoil move + LEFTUP in one SendInput(2,...) call to mimic real HID``n  compound reports (hardware mice deliver delta + button in same USB frame)``n- Add 8% probability micro-hesitation (1-3ms) between shots to simulate``n  natural human timing variation and break statistical pattern analysis``n``nAssets:``n- PhantomRecoilSetup_v${{ env.APP_VERSION }}.exe``n- Phantom_Recoil_Standalone.exe``n- SHA256SUMS.txt``n- latest.json"
         gh release create $version "dist/Phantom_Recoil_Standalone.exe" $setupFile "SHA256SUMS.txt" "latest.json" --title $version --notes $notes
