@@ -465,6 +465,98 @@ input[type='range']::-moz-range-thumb {
   background: rgba(9, 8, 6, 0.55);
 }
 
+.rapid-fire-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(9, 8, 6, 0.55);
+}
+
+.rf-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.rf-bolt-icon {
+  font-size: 14px;
+  color: var(--warning);
+}
+
+.dmr-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--warning);
+  border: 1px solid rgba(200, 158, 65, 0.5);
+  border-radius: 3px;
+  padding: 1px 4px;
+  background: rgba(200, 158, 65, 0.1);
+}
+
+/* CSS toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle-switch input[type='checkbox'] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-track {
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(30, 28, 22, 0.9);
+  border: 1px solid var(--line-strong);
+  position: relative;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-track {
+  background: rgba(200, 158, 65, 0.25);
+  border-color: var(--warning);
+}
+
+.toggle-switch input:checked + .toggle-track::after {
+  transform: translateX(16px);
+  background: var(--warning);
+}
+
+.toggle-switch input:focus-visible + .toggle-track {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
 .recoil-graph-panel {
   margin-top: 9px;
   border: 1px solid var(--line);

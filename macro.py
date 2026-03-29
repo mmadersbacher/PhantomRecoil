@@ -68,7 +68,9 @@ class _INPUT(ctypes.Structure):
 
 
 _INPUT_MOUSE = 0
-_MOUSEEVENTF_MOVE = 0x0001
+_MOUSEEVENTF_MOVE      = 0x0001
+_MOUSEEVENTF_LEFTDOWN  = 0x0002
+_MOUSEEVENTF_LEFTUP    = 0x0004
 
 
 def _send_relative_mouse_move(dx: int, dy: int) -> None:
@@ -79,6 +81,20 @@ def _send_relative_mouse_move(dx: int, dy: int) -> None:
         dy=dy,
         mouseData=0,
         dwFlags=_MOUSEEVENTF_MOVE,
+        time=0,
+        dwExtraInfo=None,
+    )
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+
+
+def _send_mouse_button(flags: int) -> None:
+    """Inject a mouse button event via SendInput (e.g. LEFTDOWN / LEFTUP)."""
+    inp = _INPUT(type=_INPUT_MOUSE)
+    inp._input.mi = _MOUSEINPUT(
+        dx=0,
+        dy=0,
+        mouseData=0,
+        dwFlags=flags,
         time=0,
         dwExtraInfo=None,
     )
@@ -121,6 +137,12 @@ class RecoilMacro:
         self.accumulated_x = 0.0
         self.accumulated_y = 0.0
         self.is_active = False
+
+        # Rapid fire state — for semi-auto weapons (DMRs).
+        # When enabled the loop injects timed click sequences instead of
+        # continuously compensating while LMB is physically held.
+        self.rapid_fire = False
+        self.fire_interval = 0.30  # seconds between shots (≈ 200 RPM default)
 
         # Game detection state.
         self._game_running = True   # optimistic default so macro works if psutil absent
@@ -183,6 +205,33 @@ class RecoilMacro:
         logger.info("[Macro] Hotkey changed to %s (VK 0x%02X).", VK_NAMES.get(vk, '?'), vk)
         return True
 
+    def set_rapid_fire(self, enabled: bool, interval_ms: float = 300.0) -> None:
+        """Enable or disable rapid fire mode for semi-auto weapons (DMRs).
+
+        interval_ms: time between shots in milliseconds (clamped 50–2000).
+        """
+        safe_interval = self._sanitize_number(interval_ms, default=300.0)
+        safe_interval = max(50.0, min(2000.0, safe_interval))
+        with self._state_lock:
+            self.rapid_fire = bool(enabled)
+            self.fire_interval = safe_interval / 1000.0
+        logger.info("[Macro] Rapid fire: enabled=%s interval=%.0fms", bool(enabled), safe_interval)
+
+    def _sleep_interruptible(self, duration: float, step: float = 0.010) -> bool:
+        """Sleep for *duration* seconds in small steps.
+
+        Returns False immediately if the macro is stopped mid-sleep so the
+        caller can break out of the polling loop cleanly.
+        """
+        elapsed = 0.0
+        while elapsed < duration:
+            t = min(step, duration - elapsed)
+            time.sleep(t)
+            elapsed += t
+            if not self.running:   # racy but acceptable for a stop-check
+                return False
+        return True
+
     def stop(self):
         """Stops the macro loop gracefully."""
         with self._state_lock:
@@ -200,6 +249,8 @@ class RecoilMacro:
                 'hotkey_vk': self.hotkey_vk,
                 'hotkey_name': VK_NAMES.get(self.hotkey_vk, f'VK_0x{self.hotkey_vk:02X}'),
                 'game_running': self._game_running,
+                'rapid_fire': self.rapid_fire,
+                'fire_interval_ms': round(self.fire_interval * 1000),
             }
 
     def start(self):
@@ -275,6 +326,8 @@ class RecoilMacro:
                         recoil_x = self.recoil_x
                         recoil_y = self.recoil_y
                         multiplier = self.multiplier
+                        rapid_fire = self.rapid_fire
+                        fire_interval = self.fire_interval
 
                     if hotkey_active:
                         # Check if Right Mouse Button is pressed (Aiming).
@@ -285,26 +338,69 @@ class RecoilMacro:
                             lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
 
                             if lmb_pressed:
-                                # Original Lua logic: MoveMouseRelative(recoilX - 1, recoilY)
-                                # We apply the multiplier to lessen aggressive pulling.
-                                dx_target = (recoil_x - 1) * multiplier
-                                dy_target = recoil_y * multiplier
+                                if rapid_fire:
+                                    # ── Rapid fire for semi-auto weapons (DMRs) ──────────────
+                                    # The user holds LMB; we inject a timed release+press
+                                    # sequence so the game registers individual shots at the
+                                    # configured fire rate, with recoil compensation per shot.
 
-                                # Accumulate decimals to ensure smooth slow pull instead of jitter.
-                                self.accumulated_x += dx_target
-                                self.accumulated_y += dy_target
+                                    # Apply recoil compensation for this shot.
+                                    dx_target = (recoil_x - 1) * multiplier
+                                    dy_target = recoil_y * multiplier
+                                    self.accumulated_x += dx_target
+                                    self.accumulated_y += dy_target
+                                    move_x = int(self.accumulated_x)
+                                    move_y = int(self.accumulated_y)
+                                    if move_x != 0 or move_y != 0:
+                                        _send_relative_mouse_move(move_x, move_y)
+                                        self.accumulated_x -= move_x
+                                        self.accumulated_y -= move_y
 
-                                move_x = int(self.accumulated_x)
-                                move_y = int(self.accumulated_y)
+                                    # Wait the inter-shot interval (reserve 40 ms for
+                                    # the click simulation at the end).
+                                    _RF_CLICK_GAP = 0.040
+                                    if not self._sleep_interruptible(
+                                        max(0.010, fire_interval - _RF_CLICK_GAP)
+                                    ):
+                                        break
 
-                                # Only move mouse if there's actually a full pixel to move.
-                                if move_x != 0 or move_y != 0:
-                                    _send_relative_mouse_move(move_x, move_y)
-                                    self.accumulated_x -= move_x
-                                    self.accumulated_y -= move_y
+                                    # After the interval the HID driver has had plenty of
+                                    # time to restore the async key state if the user is
+                                    # still physically holding LMB.
+                                    if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0:
+                                        # Re-click: brief release then press to fire next shot.
+                                        _send_mouse_button(_MOUSEEVENTF_LEFTUP)
+                                        time.sleep(0.014)
+                                        _send_mouse_button(_MOUSEEVENTF_LEFTDOWN)
+                                        time.sleep(0.026)
+                                    else:
+                                        # User released LMB — stop rapid fire cycle.
+                                        self.accumulated_x = 0.0
+                                        self.accumulated_y = 0.0
 
-                                # Random sleep between 2 and 3 ms as per Lua script: Sleep(math.random(2,3))
-                                time.sleep(random.uniform(0.002, 0.003))
+                                else:
+                                    # ── Normal recoil compensation ────────────────────────────
+                                    # Original Lua logic: MoveMouseRelative(recoilX - 1, recoilY)
+                                    # We apply the multiplier to lessen aggressive pulling.
+                                    dx_target = (recoil_x - 1) * multiplier
+                                    dy_target = recoil_y * multiplier
+
+                                    # Accumulate decimals to ensure smooth slow pull instead of jitter.
+                                    self.accumulated_x += dx_target
+                                    self.accumulated_y += dy_target
+
+                                    move_x = int(self.accumulated_x)
+                                    move_y = int(self.accumulated_y)
+
+                                    # Only move mouse if there's actually a full pixel to move.
+                                    if move_x != 0 or move_y != 0:
+                                        _send_relative_mouse_move(move_x, move_y)
+                                        self.accumulated_x -= move_x
+                                        self.accumulated_y -= move_y
+
+                                    # Random sleep between 2 and 3 ms as per Lua script: Sleep(math.random(2,3))
+                                    time.sleep(random.uniform(0.002, 0.003))
+
                                 continue
 
                         # Reset accumulators if not actively firing.

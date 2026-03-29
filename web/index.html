@@ -64,6 +64,17 @@
               <p id="selected-weapon">Select a weapon</p>
               <div class="recoil-values">Base: X: <span id="val-x">0</span> | Y: <span id="val-y">0</span></div>
               <div class="recoil-values effective-values">Effective: X: <span id="val-eff-x">0.00</span> | Y: <span id="val-eff-y">0.00</span></div>
+              <div id="rapid-fire-panel" class="rapid-fire-panel" style="display:none" role="group" aria-label="Rapid fire settings">
+                <div class="rf-label">
+                  <span class="material-icons-outlined rf-bolt-icon" aria-hidden="true">bolt</span>
+                  Rapid Fire
+                  <span class="dmr-badge">SEMI</span>
+                </div>
+                <label class="toggle-switch" title="Enable rapid fire for this DMR">
+                  <input type="checkbox" id="rapid-fire-toggle" role="switch" aria-label="Enable rapid fire for this DMR">
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
               <div class="recoil-graph-panel">
                 <div class="recoil-graph-head">
                   <span>Recoil Graph</span>

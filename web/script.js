@@ -20,6 +20,32 @@ const KEY_TO_VK = {
 // Reference sensitivity the recoil profiles are calibrated for (R6S default).
 const REFERENCE_SENSITIVITY = 50;
 
+// All semi-automatic weapons (one shot per click — no full-auto stream).
+// Excludes: full-auto ARs/SMGs/LMGs/machine pistols, pump-action shotguns (M870,
+// M590A1, SuperNova, SG-CQB, ITA12L/S, SPAS-12, Super Shorty), full-auto ACS12.
+const SEMI_AUTO_WEAPONS = new Set([
+    // DMRs
+    '417', 'AR-15.50', 'ARX200', 'CAMRS', 'Mk 14 EBR',
+    'OTs-03', 'PARA-308', 'SR-25', 'Spear .308',
+    // Sniper
+    'CSRX 300',
+    // Semi-auto shotguns
+    'Bailiff 410', 'BOSG.12.2', 'FO-12', 'Glaive-12',
+    'M1014', 'SASG-12', 'SIX12', 'SIX12 SD', 'SPAS-15', 'Super 90', 'TCSG12',
+    // Pistols
+    '.44 MAG SEMI-AUTO', '1911 TACOPS', '5.7 USG', 'D-50', 'GSh-18',
+    'Keratos .357', 'LFP586', 'Luison', 'M45 MEUSOC', 'Mk1 9mm',
+    'P-10C', 'P12', 'P226 Mk 25', 'P229', 'P9', 'PMM', 'PMR90A2',
+    'PRB92', 'Q-929', 'RG15', 'Reaper MK2', 'SDP 9mm', 'TACIT .45',
+    'USP40', 'Vendetta',
+    // Other single-shot secondaries
+    'Gonne-6',
+]);
+
+function isSemiAuto(weapon) {
+    return Boolean(weapon && SEMI_AUTO_WEAPONS.has(weapon.name));
+}
+
 // State
 let currentTab = 'attackers';
 let searchQuery = '';
@@ -27,6 +53,7 @@ let favorites = loadFavorites();
 let userDpi = loadDpi();
 let userSensitivity = loadSensitivity();
 let weaponIntensityMap = loadWeaponIntensityMap();
+let weaponRapidFireMap = loadWeaponRapidFireMap();
 let selectedOperator = null;
 let selectedWeapon = null;
 let lastScaledRecoil = { x: 0, y: 0 };
@@ -186,6 +213,44 @@ function setWeaponIntensity(operator, weapon, value) {
     weaponIntensityMap[key] = clampIntensity(value);
     saveWeaponIntensityMap();
     return weaponIntensityMap[key];
+}
+
+function loadWeaponRapidFireMap() {
+    try {
+        const raw = localStorage.getItem('r6_weapon_rapidfire');
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        return parsed;
+    } catch (err) {
+        console.warn('[Storage] Invalid rapid fire map, resetting.', err);
+        return {};
+    }
+}
+
+function saveWeaponRapidFireMap() {
+    localStorage.setItem('r6_weapon_rapidfire', JSON.stringify(weaponRapidFireMap));
+}
+
+function getWeaponRapidFire(operator, weapon) {
+    const key = getWeaponKey(operator, weapon);
+    return Object.prototype.hasOwnProperty.call(weaponRapidFireMap, key)
+        ? Boolean(weaponRapidFireMap[key])
+        : false;
+}
+
+function setWeaponRapidFire(operator, weapon, enabled) {
+    const key = getWeaponKey(operator, weapon);
+    weaponRapidFireMap[key] = Boolean(enabled);
+    saveWeaponRapidFireMap();
+}
+
+function sendRapidFireToBackend(enabled) {
+    if (isPyWebViewAvailable()) {
+        window.pywebview.api.set_rapid_fire(Boolean(enabled)).catch((err) => {
+            console.error('[PyWebView API Error] set_rapid_fire failed', err);
+        });
+    }
 }
 
 function isPyWebViewAvailable() {
@@ -492,6 +557,7 @@ function exportSettings() {
         dpi: userDpi,
         sensitivity: userSensitivity,
         weaponIntensityMap,
+        weaponRapidFireMap,
         hotkeyVk: currentHotkeyVk,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -529,6 +595,15 @@ function importSettings(file) {
                 });
                 weaponIntensityMap = cleaned;
                 saveWeaponIntensityMap();
+            }
+
+            if (data.weaponRapidFireMap && typeof data.weaponRapidFireMap === 'object') {
+                const rfCleaned = {};
+                Object.keys(data.weaponRapidFireMap).forEach((key) => {
+                    rfCleaned[key] = Boolean(data.weaponRapidFireMap[key]);
+                });
+                weaponRapidFireMap = rfCleaned;
+                saveWeaponRapidFireMap();
             }
 
             if (data.hotkeyVk !== undefined) {
@@ -937,6 +1012,22 @@ function selectWeapon(operator, weapon) {
         );
     }
 
+    // Show rapid fire panel for DMRs, restore per-weapon toggle state.
+    const rfPanel = document.getElementById('rapid-fire-panel');
+    const rfToggle = document.getElementById('rapid-fire-toggle');
+    if (rfPanel) {
+        if (isSemiAuto(weapon)) {
+            const savedRf = getWeaponRapidFire(operator, weapon);
+            if (rfToggle) rfToggle.checked = savedRf;
+            rfPanel.style.display = '';
+            sendRapidFireToBackend(savedRf);
+        } else {
+            rfPanel.style.display = 'none';
+            if (rfToggle) rfToggle.checked = false;
+            sendRapidFireToBackend(false);
+        }
+    }
+
     syncSelectedWeaponButtons();
 }
 
@@ -1315,6 +1406,20 @@ function initializeUI() {
                 selectWeapon(selectedOperator, selectedWeapon);
             }
         });
+    }
+
+    const rfToggle = document.getElementById('rapid-fire-toggle');
+    if (rfToggle) {
+        rfToggle.addEventListener('change', () => {
+            const enabled = rfToggle.checked;
+            if (selectedOperator && selectedWeapon) {
+                setWeaponRapidFire(selectedOperator, selectedWeapon, enabled);
+            }
+            sendRapidFireToBackend(enabled);
+            sendClientEvent('info', 'rapid fire toggled', { enabled, weapon: selectedWeapon && selectedWeapon.name });
+        });
+        // Prevent scroll wheel from accidentally toggling.
+        rfToggle.addEventListener('wheel', () => { rfToggle.blur(); }, { passive: true });
     }
 
     const hotkeyCaptureBtn = document.getElementById('hotkey-capture-btn');

@@ -141,6 +141,13 @@ class Api:
         logger.info("[Backend] Intensity set -> %s", safe_mult)
         self._macro.set_multiplier(safe_mult)
 
+    def set_rapid_fire(self, enabled, interval_ms=300.0):
+        safe_enabled = bool(enabled)
+        safe_interval = self._to_finite_number(interval_ms, default=300.0)
+        safe_interval = max(50.0, min(2000.0, safe_interval))
+        logger.info("[Backend] Rapid fire: enabled=%s interval=%.0fms", safe_enabled, safe_interval)
+        self._macro.set_rapid_fire(safe_enabled, safe_interval)
+
     def get_hotkey_state(self):
         """Called by JavaScript polling to read the active hotkey state and game status."""
         try:
