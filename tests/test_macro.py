@@ -83,7 +83,6 @@ class TestRapidFire(unittest.TestCase):
 
         self.macro._rf_btn_down = True
         self.macro._rf_hold_neutralized = True
-        self.macro._rf_next_shot_at = 42.0
 
         with mock.patch.object(_macro, '_send_mouse_button') as mock_button:
             self.macro.set_rapid_fire(False)
@@ -91,7 +90,6 @@ class TestRapidFire(unittest.TestCase):
         mock_button.assert_called_once_with(_macro._MOUSEEVENTF_LEFTUP)
         self.assertFalse(self.macro._rf_btn_down)
         self.assertFalse(self.macro._rf_hold_neutralized)
-        self.assertEqual(self.macro._rf_next_shot_at, 0.0)
 
     def test_mouse_hook_ignores_injected_clicks(self):
         import macro as _macro
@@ -108,54 +106,52 @@ class TestRapidFire(unittest.TestCase):
     def test_rf_fire_shot_finishes_with_leftup(self):
         import macro as _macro
 
-        self.macro._rf_next_shot_at = 4.0
         with (
-            mock.patch.object(_macro, '_send_mouse_button') as mock_button,
             mock.patch.object(_macro, '_send_button_with_move') as mock_button_with_move,
-            mock.patch.object(self.macro, '_sleep_interruptible', return_value=True),
-            mock.patch.object(_macro.time, 'monotonic', return_value=5.2),
+            mock.patch.object(_macro.time, 'sleep'),
         ):
-            self.macro._rf_fire_shot(recoil_x=2, recoil_y=3, multiplier=1.0, now=5.0)
+            self.macro._rf_fire_shot(recoil_x=2, recoil_y=3, multiplier=1.0)
 
-        mock_button.assert_called_once_with(_macro._MOUSEEVENTF_LEFTDOWN)
-        mock_button_with_move.assert_called_once_with(_macro._MOUSEEVENTF_LEFTUP, 1, 3)
+        # Must call _send_button_with_move exactly twice: DOWN then UP
+        self.assertEqual(mock_button_with_move.call_count, 2)
+        self.assertEqual(mock_button_with_move.call_args_list[0][0][0], _macro._MOUSEEVENTF_LEFTDOWN)
+        self.assertEqual(mock_button_with_move.call_args_list[1][0][0], _macro._MOUSEEVENTF_LEFTUP)
         self.assertFalse(self.macro._rf_btn_down)
         self.assertEqual(self.macro.accumulated_x, 0.0)
         self.assertEqual(self.macro.accumulated_y, 0.0)
-        self.assertGreater(self.macro._rf_next_shot_at, 5.0)
 
-    def test_rf_fire_shot_skips_before_interval(self):
+    def test_rf_fire_shot_down_before_up(self):
+        """DOWN event must always precede the matching UP in a single shot."""
         import macro as _macro
 
-        self.macro._rf_next_shot_at = 10.0
+        order = []
+        def track(flags, dx=0, dy=0):
+            order.append(flags)
+
         with (
-            mock.patch.object(_macro, '_send_mouse_button') as mock_button,
-            mock.patch.object(_macro, '_send_button_with_move') as mock_button_with_move,
+            mock.patch.object(_macro, '_send_button_with_move', side_effect=track),
+            mock.patch.object(_macro.time, 'sleep'),
         ):
-            self.macro._rf_fire_shot(recoil_x=2, recoil_y=3, multiplier=1.0, now=9.5)
+            self.macro._rf_fire_shot(recoil_x=0, recoil_y=0, multiplier=1.0)
 
-        mock_button.assert_not_called()
-        mock_button_with_move.assert_not_called()
-        self.assertFalse(self.macro._rf_btn_down)
-        self.assertEqual(self.macro._rf_next_shot_at, 10.0)
+        self.assertIn(_macro._MOUSEEVENTF_LEFTDOWN, order)
+        self.assertIn(_macro._MOUSEEVENTF_LEFTUP, order)
+        self.assertLess(order.index(_macro._MOUSEEVENTF_LEFTDOWN), order.index(_macro._MOUSEEVENTF_LEFTUP))
 
-    def test_rf_fire_shot_releases_if_interrupted_mid_click(self):
+    def test_rf_fire_shot_releases_on_exception(self):
+        """If an exception occurs after DOWN, LEFTUP must still be sent via _rf_release."""
         import macro as _macro
 
-        self.macro._rf_next_shot_at = 1.0
+        # time.sleep raises immediately → interrupts after DOWN was injected
         with (
-            mock.patch.object(_macro, '_send_mouse_button') as mock_button,
-            mock.patch.object(_macro, '_send_button_with_move') as mock_button_with_move,
-            mock.patch.object(self.macro, '_sleep_interruptible', return_value=False),
-            mock.patch.object(_macro.time, 'monotonic', return_value=2.0),
+            mock.patch.object(_macro, '_send_button_with_move'),
+            mock.patch.object(_macro, '_send_mouse_button') as mock_btn,
+            mock.patch.object(_macro.time, 'sleep', side_effect=RuntimeError("interrupted")),
         ):
-            self.macro._rf_fire_shot(recoil_x=2, recoil_y=3, multiplier=1.0, now=1.5)
+            with self.assertRaises(RuntimeError):
+                self.macro._rf_fire_shot(recoil_x=2, recoil_y=3, multiplier=1.0)
 
-        self.assertEqual(mock_button.call_args_list, [
-            mock.call(_macro._MOUSEEVENTF_LEFTDOWN),
-            mock.call(_macro._MOUSEEVENTF_LEFTUP),
-        ])
-        mock_button_with_move.assert_not_called()
+        mock_btn.assert_called_once_with(_macro._MOUSEEVENTF_LEFTUP)
         self.assertFalse(self.macro._rf_btn_down)
 
 

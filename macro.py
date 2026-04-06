@@ -449,9 +449,9 @@ class RecoilMacro:
             _send_button_with_move(_MOUSEEVENTF_LEFTDOWN, tremor_x, tremor_y)
             self._rf_btn_down = True
 
-            # Click-hold duration: triangular distribution (mode 42 ms).
-            # Real human button-press measurements: 30–80 ms, peak ~45 ms.
-            time.sleep(random.triangular(0.028, 0.075, 0.042))
+            # Click-hold duration: triangular distribution (mode 38 ms).
+            # Real human button-press measurements: 26–68 ms, peak ~38 ms.
+            time.sleep(random.triangular(0.026, 0.068, 0.038))
 
             # Bundle UP + recoil compensation in one SendInput batch.
             _send_button_with_move(_MOUSEEVENTF_LEFTUP, move_x, move_y)
@@ -467,9 +467,9 @@ class RecoilMacro:
         self.accumulated_x = 0.0
         self.accumulated_y = 0.0
 
-        # Inter-shot gap: triangular distribution (mode 62 ms).
-        # Gives ~6–13 shots/sec which matches fast but plausible human clicking.
-        gap = random.triangular(0.045, 0.095, 0.062)
+        # Inter-shot gap: triangular distribution (mode 55 ms).
+        # Gives ~7–14 shots/sec which matches fast but plausible human clicking.
+        gap = random.triangular(0.040, 0.085, 0.055)
 
         # Fatigue simulation: after every N shots the finger needs a tiny rest.
         # N is randomised (7–14) so the period itself is unpredictable.
@@ -614,6 +614,7 @@ class RecoilMacro:
                                     # ── Ultra-fast rapid fire for semi-auto weapons ───────────
                                     self._rf_prime_burst()
                                     self._rf_fire_shot(recoil_x, recoil_y, multiplier)
+                                    continue  # skip fall-through reset; keep burst state intact
 
                                 else:
                                     self._rf_reset_cycle()
