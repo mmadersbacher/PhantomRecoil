@@ -1,18 +1,22 @@
 {
   "version": "v1.0.41",
   "release_url": "https://github.com/mmadersbacher/PhantomRecoil/releases/tag/v1.0.41",
-  "generated_at_utc": "2026-04-06T09:04:48.061294+00:00",
+  "generated_at_utc": "2026-04-06T09:13:52.229898+00:00",
   "assets": {
     "portable": {
       "name": "Phantom_Recoil_Standalone.exe",
       "url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.41/Phantom_Recoil_Standalone.exe",
       "sha256": "81b4f20832e4e9c9a15c7a93118340ed24200d8a2a204e6b2bcbdc18d1188f2e"
     },
-    "installer": null,
+    "installer": {
+      "name": "PhantomRecoilSetup_v1.0.41.exe",
+      "url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.41/PhantomRecoilSetup_v1.0.41.exe",
+      "sha256": "45fa273bdc5c538853f007d412ef7a1587723404c1c38a30ac514b5a2a79589f"
+    },
     "checksums": {
       "name": "SHA256SUMS.txt",
       "url": "https://github.com/mmadersbacher/PhantomRecoil/releases/download/v1.0.41/SHA256SUMS.txt",
-      "sha256": "74a637eb74dee38b2d208e1b571762085453fed50c8b475fd2b7f7f5c2b59f14"
+      "sha256": "4691a6ac3981d00d81aaed2362debef801d84fcc479b6df98e72882d8e74eb8a"
     }
   }
 }
