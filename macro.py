@@ -231,9 +231,14 @@ class RecoilMacro:
         self._mouse_hook_ready = threading.Event()
         self._mouse_hook_available = False
 
-        # Game detection state.
+        # Game detection state — updated by a dedicated background thread so
+        # psutil never blocks the main loop (and thus never holds the GIL long
+        # enough to trigger the Windows LowLevelHooksTimeout on the hook).
         self._game_running = True   # optimistic default so macro works if psutil absent
-        self._last_game_check = 0.0
+        self._game_check_thread = None
+
+        # How often (seconds) the hook health is verified in the main loop.
+        self._last_hook_check = 0.0
 
         # Scheduling diagnostics — set during start().
         self.timer_resolution_set = False   # True if timeBeginPeriod(1) succeeded
@@ -383,19 +388,39 @@ class RecoilMacro:
             with self._state_lock:
                 self._mouse_hook = None
                 self._mouse_hook_available = False
-                self._physical_lmb_pressed = False
+                # Do NOT reset _physical_lmb_pressed here.  If the hook is
+                # silently removed by Windows (LowLevelHooksTimeout) while the
+                # user is holding LMB during a rapid-fire burst, we must retain
+                # the last known physical state.  Resetting to False would
+                # immediately terminate the burst even though the button is
+                # still physically held.
             self._mouse_hook_thread_id = 0
             self._mouse_hook_proc = None
             logger.info("[Macro] Low-level mouse hook stopped.")
 
-    def _ensure_mouse_hook(self) -> None:
-        """Start physical mouse tracking once before the macro loop begins."""
+    def _ensure_mouse_hook(self, wait: bool = True) -> None:
+        """Start (or restart) physical mouse tracking.
+
+        wait=True blocks until the hook is installed (used at startup).
+        wait=False is fire-and-forget (used for periodic health checks during
+        the macro loop — avoids stalling the main loop for up to 1 s).
+
+        The physical LMB state is only re-seeded from GetAsyncKeyState when
+        there is NO active rapid-fire burst.  During a burst we have already
+        injected synthetic LEFTUP events, so GetAsyncKeyState would return
+        False even though the user is physically holding the button — seeding
+        from it would immediately kill the burst.
+        """
         if self._mouse_hook_thread and self._mouse_hook_thread.is_alive():
             return
-        self._physical_lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
+        # Only seed from GetAsyncKeyState outside of an active burst; during a
+        # burst keep whatever physical state the dying hook last reported.
+        if not self._rf_hold_neutralized:
+            self._physical_lmb_pressed = win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
         self._mouse_hook_thread = threading.Thread(target=self._mouse_hook_loop, daemon=True, name='mouse-hook')
         self._mouse_hook_thread.start()
-        self._mouse_hook_ready.wait(timeout=1.0)
+        if wait:
+            self._mouse_hook_ready.wait(timeout=1.0)
 
     def _stop_mouse_hook(self) -> None:
         """Stop the physical mouse tracking thread if it is running."""
@@ -408,9 +433,26 @@ class RecoilMacro:
         self._mouse_hook_thread = None
 
     def _is_lmb_pressed(self) -> bool:
-        """Read physical LMB state, falling back to GetAsyncKeyState if needed."""
+        """Read physical LMB state.
+
+        Priority order:
+        1. Low-level hook (most accurate — distinguishes physical from injected).
+        2. Last-known physical state while an active burst is in progress.
+           During rapid fire we inject synthetic LEFTUP events, which cause
+           GetAsyncKeyState to report LMB as "up" even when the button is
+           physically held (the OS only sees the injected event; the physical
+           mouse does not re-send a DOWN event for a sustained hold).  Trusting
+           the last value the hook reported avoids falsely terminating the burst.
+        3. GetAsyncKeyState — only for the non-burst fallback path where no
+           synthetic events have been injected recently.
+        """
         with self._state_lock:
             if self._mouse_hook_available:
+                return self._physical_lmb_pressed
+            # Hook unavailable: if we are inside an active rapid-fire burst use
+            # the last physical state the hook recorded rather than falling back
+            # to GetAsyncKeyState, which is poisoned by our own synthetic events.
+            if self._rf_hold_neutralized:
                 return self._physical_lmb_pressed
         return win32api.GetAsyncKeyState(win32con.VK_LBUTTON) < 0
 
@@ -565,6 +607,33 @@ class RecoilMacro:
             logger.warning("[Macro] Could not set GIL switch interval.")
 
         self._ensure_mouse_hook()
+
+        # ── Background game-detection thread ─────────────────────────────────────
+        # Run psutil.process_iter in a daemon thread so it never executes on the
+        # main macro thread.  psutil can hold the Python GIL for 100-500 ms while
+        # iterating system processes.  If a physical mouse event arrives during
+        # that GIL hold, the low-level hook callback cannot be invoked in time,
+        # and Windows silently removes the hook (LowLevelHooksTimeout ≈ 300 ms).
+        # Offloading psutil to its own thread eliminates this entire failure class.
+        def _game_check_loop():
+            while self.running:
+                try:
+                    running = self._is_game_running()
+                    if self._game_running != running:
+                        if not running:
+                            logger.info("[Macro] R6 Siege not detected — macro suspended.")
+                        else:
+                            logger.info("[Macro] R6 Siege detected — macro resumed.")
+                    self._game_running = running
+                except Exception:
+                    pass
+                time.sleep(GAME_CHECK_INTERVAL)
+
+        self._game_check_thread = threading.Thread(
+            target=_game_check_loop, daemon=True, name='game-check'
+        )
+        self._game_check_thread.start()
+
         with self._state_lock:
             self.running = True
 
@@ -575,13 +644,17 @@ class RecoilMacro:
                         break
                     hotkey_vk = self.hotkey_vk
                 try:
-                    # Periodically verify that R6 Siege is actually running.
                     now = time.time()
-                    if now - self._last_game_check >= GAME_CHECK_INTERVAL:
-                        self._last_game_check = now
-                        self._game_running = self._is_game_running()
-                        if not self._game_running:
-                            logger.info("[Macro] R6 Siege not detected — macro suspended.")
+
+                    # ── Hook health check ─────────────────────────────────────────
+                    # Windows silently removes WH_MOUSE_LL hooks that miss the
+                    # LowLevelHooksTimeout without notifying us.  Detect a dead
+                    # hook thread and restart it non-blockingly every 2 seconds.
+                    # wait=False avoids stalling the main loop; the hook is usable
+                    # within ~10 ms after the new thread starts.
+                    if now - self._last_hook_check >= 2.0:
+                        self._last_hook_check = now
+                        self._ensure_mouse_hook(wait=False)
 
                     if not self._game_running:
                         with self._state_lock:
